@@ -29,16 +29,20 @@ public static class UpdatePackageValidator
     private const int MaximumEntries = 4096;
     private const long MaximumExpandedSize = 500L * 1024 * 1024;
     private const int MaximumMetadataSize = 16 * 1024;
-    private static readonly string[] RequiredEntries =
+    private static readonly string[] CommonRequiredEntries =
     [
         "PinNote.exe",
         "PinNote.dll",
         "PinNote.Updater.exe",
-        "PinNote.Updater.dll",
-        "PinNote.Updater.deps.json",
-        "PinNote.Updater.runtimeconfig.json",
         "pinnote-install.json",
         "pinnote-package.json"
+    ];
+
+    private static readonly string[] LiteUpdaterEntries =
+    [
+        "PinNote.Updater.dll",
+        "PinNote.Updater.deps.json",
+        "PinNote.Updater.runtimeconfig.json"
     ];
 
     public static async Task<ValidatedPackage> ValidateAsync(
@@ -87,12 +91,27 @@ public static class UpdatePackageValidator
             }
         }
 
-        foreach (var required in RequiredEntries)
+        foreach (var required in CommonRequiredEntries)
         {
             if (!files.Contains(required))
             {
                 throw new InvalidDataException($"更新包缺少必需文件：{required}");
             }
+        }
+
+        if (update.Channel == UpdateTrust.LiteChannel)
+        {
+            foreach (var required in LiteUpdaterEntries)
+            {
+                if (!files.Contains(required))
+                {
+                    throw new InvalidDataException($"轻量更新包缺少必需文件：{required}");
+                }
+            }
+        }
+        else if (update.Channel != UpdateTrust.FullChannel)
+        {
+            throw new InvalidDataException("更新包使用了不支持的通道。");
         }
 
         var metadata = await ReadMetadataAsync(archive, cancellationToken).ConfigureAwait(false);

@@ -13,7 +13,7 @@ public static class UpdateInstaller
         UpdateInfo update,
         CancellationToken cancellationToken = default)
     {
-        var targetRoot = EnsureInstallRoot(targetDirectory);
+        var targetRoot = EnsureInstallRoot(targetDirectory, update.Channel);
         await UpdatePackageValidator.ValidateAsync(packagePath, update, cancellationToken).ConfigureAwait(false);
 
         var transactionRoot = Path.Combine(targetRoot, TransactionDirectoryName, Guid.NewGuid().ToString("N"));
@@ -67,7 +67,7 @@ public static class UpdateInstaller
         }
     }
 
-    public static string EnsureInstallRoot(string targetDirectory)
+    public static string EnsureInstallRoot(string targetDirectory, string? expectedChannel = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
         var targetRoot = Path.GetFullPath(targetDirectory).TrimEnd(Path.DirectorySeparatorChar);
@@ -79,11 +79,22 @@ public static class UpdateInstaller
         }
 
         var marker = JsonSerializer.Deserialize<PinNotePackageMetadata>(File.ReadAllText(markerPath));
-        if (marker?.ProductId != UpdateTrust.ProductId || marker.Channel != UpdateTrust.Channel)
+        if (marker?.ProductId != UpdateTrust.ProductId ||
+            !UpdateTrust.IsSupportedChannel(marker.Channel) ||
+            (expectedChannel is not null && marker.Channel != expectedChannel))
         {
             throw new InvalidOperationException("目标目录的产品或更新通道不匹配。");
         }
         return targetRoot;
+    }
+
+    public static string GetInstalledChannel(string targetDirectory)
+    {
+        var targetRoot = EnsureInstallRoot(targetDirectory);
+        var marker = JsonSerializer.Deserialize<PinNotePackageMetadata>(
+            File.ReadAllText(Path.Combine(targetRoot, "pinnote-install.json")))
+            ?? throw new InvalidOperationException("PinNote 安装标记无效。");
+        return marker.Channel;
     }
 
     private static async Task ExtractAsync(string packagePath, string stageRoot, CancellationToken cancellationToken)

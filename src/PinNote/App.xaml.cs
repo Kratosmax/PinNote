@@ -687,7 +687,7 @@ public sealed partial class App : System.Windows.Application
         var visualUpdate = new UpdateInfo(
             new Version(0, 4, 1),
             UpdateTrust.Channel,
-            new Uri("https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-portable-win-x64.zip"),
+            new Uri("https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-Lite-Portable.zip"),
             8_400_000,
             new string('A', 64),
             "新增安全自动更新，并优化提醒窗口在高 DPI 下的稳定性。\n\n下载后会验证签名、哈希与包内版本。",

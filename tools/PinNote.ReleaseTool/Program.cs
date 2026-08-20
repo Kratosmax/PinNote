@@ -30,11 +30,12 @@ catch (Exception exception)
 static async Task WriteMetadataAsync(IReadOnlyDictionary<string, string> options)
 {
     var version = RequireVersion(options);
+    var channel = RequireChannel(options);
     var output = Require(options, "output");
     var metadata = new PinNotePackageMetadata
     {
         Version = version.ToString(3),
-        Channel = UpdateTrust.Channel
+        Channel = channel
     };
     await File.WriteAllTextAsync(output, JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
 }
@@ -42,6 +43,7 @@ static async Task WriteMetadataAsync(IReadOnlyDictionary<string, string> options
 static async Task WriteManifestAsync(IReadOnlyDictionary<string, string> options)
 {
     var version = RequireVersion(options);
+    var channel = RequireChannel(options);
     var packagePath = Path.GetFullPath(Require(options, "package"));
     var privateKeyPath = Path.GetFullPath(Require(options, "private-key"));
     var output = Path.GetFullPath(Require(options, "output"));
@@ -56,14 +58,14 @@ static async Task WriteManifestAsync(IReadOnlyDictionary<string, string> options
     var unsigned = new UpdateManifest
     {
         Version = version.ToString(3),
-        Channel = UpdateTrust.Channel,
+        Channel = channel,
         DownloadUrl = downloadUrl,
         Size = file.Length,
         Sha256 = hash,
         ReleaseNotes = releaseNotes
     };
 
-    var provisional = new UpdateInfo(version, UpdateTrust.Channel, new Uri(downloadUrl), file.Length, hash, releaseNotes, string.Empty);
+    var provisional = new UpdateInfo(version, channel, new Uri(downloadUrl), file.Length, hash, releaseNotes, string.Empty);
     await UpdatePackageValidator.ValidateAsync(packagePath, provisional);
     var signature = UpdateManifestCodec.Sign(unsigned, await File.ReadAllTextAsync(privateKeyPath));
     var signed = new UpdateManifest
@@ -84,8 +86,9 @@ static async Task VerifyAsync(IReadOnlyDictionary<string, string> options)
 {
     var manifestPath = Path.GetFullPath(Require(options, "manifest"));
     var packagePath = Path.GetFullPath(Require(options, "package"));
+    var channel = RequireChannel(options);
     var json = await File.ReadAllTextAsync(manifestPath);
-    var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, UpdateTrust.Channel);
+    var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, channel);
     await UpdatePackageValidator.ValidateAsync(packagePath, update);
     Console.WriteLine($"VERIFIED {update.Version.ToString(3)} {update.Sha256}");
 }
@@ -98,6 +101,16 @@ static Version RequireVersion(IReadOnlyDictionary<string, string> options)
         throw new ArgumentException("version 必须是三段数字版本。");
     }
     return version;
+}
+
+static string RequireChannel(IReadOnlyDictionary<string, string> options)
+{
+    var channel = Require(options, "channel");
+    if (!UpdateTrust.IsSupportedChannel(channel))
+    {
+        throw new ArgumentException("channel 必须是受支持的 Lite 或 Full 通道。");
+    }
+    return channel;
 }
 
 static Dictionary<string, string> ParseOptions(string[] values)

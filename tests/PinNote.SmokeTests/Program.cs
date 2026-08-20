@@ -15,8 +15,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("schema normalization preserves groups and note state", TestSchema),
     ("json store round-trips and creates backup", TestStore),
     ("signed update manifest rejects tampering", TestUpdateManifest),
+    ("update channels reject cross-channel manifests", TestUpdateChannels),
     ("bounded copy handles non-seekable streams", TestBoundedStream),
     ("real update package validates and installs", TestUpdatePackage),
+    ("full update package accepts single-file updater", TestFullUpdatePackage),
     ("failed update restores existing files", TestUpdateRollback)
 };
 
@@ -135,7 +137,7 @@ static Task TestUpdateManifest()
     {
         Version = "0.4.1",
         Channel = UpdateTrust.Channel,
-        DownloadUrl = "https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-portable-win-x64.zip",
+        DownloadUrl = "https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-Lite-Portable.zip",
         Size = 12345,
         Sha256 = new string('A', 64),
         ReleaseNotes = "安全更新"
@@ -162,6 +164,33 @@ static Task TestUpdateManifest()
     return Task.CompletedTask;
 }
 
+static Task TestUpdateChannels()
+{
+    using var rsa = RSA.Create(2048);
+    var unsigned = new UpdateManifest
+    {
+        Version = "0.4.1",
+        Channel = UpdateTrust.FullChannel,
+        DownloadUrl = "https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-Full-Portable.zip",
+        Size = 12345,
+        Sha256 = new string('B', 64)
+    };
+    var signed = new UpdateManifest
+    {
+        Version = unsigned.Version,
+        Channel = unsigned.Channel,
+        DownloadUrl = unsigned.DownloadUrl,
+        Size = unsigned.Size,
+        Sha256 = unsigned.Sha256,
+        Signature = UpdateManifestCodec.Sign(unsigned, rsa.ExportPkcs8PrivateKeyPem())
+    };
+    var json = UpdateManifestCodec.Serialize(signed);
+    AssertThrows<InvalidDataException>(
+        () => UpdateManifestCodec.ParseAndVerify(json, rsa.ExportSubjectPublicKeyInfoPem(), UpdateTrust.LiteChannel),
+        "A Full manifest must not be accepted by a Lite installation.");
+    return Task.CompletedTask;
+}
+
 static async Task TestBoundedStream()
 {
     var bytes = Encoding.UTF8.GetBytes(new string('x', 128));
@@ -178,11 +207,11 @@ static async Task TestUpdatePackage()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 4, 0);
+        var version = new Version(0, 4, 1);
         var packagePath = await CreatePackageAsync(root, version);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
-        Assert(validated.Metadata.Version == "0.4.0", "Package metadata should match the signed version.");
+        Assert(validated.Metadata.Version == "0.4.1", "Package metadata should match the signed version.");
 
         var target = Path.Combine(root, "install");
         Directory.CreateDirectory(target);
@@ -198,12 +227,30 @@ static async Task TestUpdatePackage()
     }
 }
 
+static async Task TestFullUpdatePackage()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var version = new Version(0, 4, 1);
+        var packagePath = await CreatePackageAsync(root, version, channel: UpdateTrust.FullChannel);
+        var update = await CreateUpdateInfoAsync(packagePath, version, UpdateTrust.FullChannel);
+        var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
+        Assert(validated.Metadata.Channel == UpdateTrust.FullChannel, "Full package channel should be preserved.");
+        Assert(!validated.Files.Contains("PinNote.Updater.dll"), "Full packages should support a single-file updater.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
 static async Task TestUpdateRollback()
 {
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 4, 0);
+        var version = new Version(0, 4, 1);
         var packagePath = await CreatePackageAsync(root, version, includeLockedFile: true);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var target = Path.Combine(root, "install");
@@ -233,18 +280,25 @@ static string CreateTestDirectory()
     return directory;
 }
 
-static async Task<string> CreatePackageAsync(string root, Version version, bool includeLockedFile = false)
+static async Task<string> CreatePackageAsync(
+    string root,
+    Version version,
+    bool includeLockedFile = false,
+    string channel = UpdateTrust.LiteChannel)
 {
     var content = Path.Combine(root, "content-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(content);
     await File.WriteAllTextAsync(Path.Combine(content, "PinNote.exe"), "new");
     File.Copy(typeof(UpdateTrust).Assembly.Location, Path.Combine(content, "PinNote.dll"));
     await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.exe"), "updater");
-    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.dll"), "updater");
-    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.deps.json"), "{}");
-    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.runtimeconfig.json"), "{}");
-    await WriteMetadataAsync(Path.Combine(content, "pinnote-install.json"), version);
-    await WriteMetadataAsync(Path.Combine(content, "pinnote-package.json"), version);
+    if (channel == UpdateTrust.LiteChannel)
+    {
+        await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.dll"), "updater");
+        await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.deps.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.runtimeconfig.json"), "{}");
+    }
+    await WriteMetadataAsync(Path.Combine(content, "pinnote-install.json"), version, channel);
+    await WriteMetadataAsync(Path.Combine(content, "pinnote-package.json"), version, channel);
     if (includeLockedFile)
     {
         await File.WriteAllTextAsync(Path.Combine(content, "locked.txt"), "locked-new");
@@ -255,20 +309,23 @@ static async Task<string> CreatePackageAsync(string root, Version version, bool 
     return packagePath;
 }
 
-static Task WriteMetadataAsync(string path, Version version) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(new PinNotePackageMetadata
+static Task WriteMetadataAsync(string path, Version version, string channel = UpdateTrust.LiteChannel) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(new PinNotePackageMetadata
 {
     Version = version.ToString(3),
-    Channel = UpdateTrust.Channel
+    Channel = channel
 }));
 
-static async Task<UpdateInfo> CreateUpdateInfoAsync(string packagePath, Version version)
+static async Task<UpdateInfo> CreateUpdateInfoAsync(
+    string packagePath,
+    Version version,
+    string channel = UpdateTrust.LiteChannel)
 {
     var file = new FileInfo(packagePath);
     await using var stream = file.OpenRead();
     var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream));
     return new UpdateInfo(
         version,
-        UpdateTrust.Channel,
+        channel,
         new Uri($"https://github.com/Kratosmax/PinNote/releases/download/v{version.ToString(3)}/package.zip"),
         file.Length,
         hash,

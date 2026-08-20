@@ -12,8 +12,8 @@ internal sealed record PreparedUpdate(string PackagePath, string ManifestPath, s
 
 internal sealed class UpdateClient : IDisposable
 {
-    private static readonly Uri ManifestUri = new(
-        "https://github.com/Kratosmax/PinNote/releases/latest/download/update.json");
+    private const string ManifestBaseUrl =
+        "https://github.com/Kratosmax/PinNote/releases/latest/download/";
     private static readonly HashSet<string> AllowedRedirectHosts = new(StringComparer.OrdinalIgnoreCase)
     {
         "github.com",
@@ -49,7 +49,7 @@ internal sealed class UpdateClient : IDisposable
         {
             try
             {
-                _ = UpdateInstaller.EnsureInstallRoot(AppContext.BaseDirectory);
+                _ = UpdateInstaller.GetInstalledChannel(AppContext.BaseDirectory);
                 return File.Exists(Path.Combine(AppContext.BaseDirectory, "PinNote.Updater.exe"));
             }
             catch (InvalidOperationException)
@@ -59,11 +59,28 @@ internal sealed class UpdateClient : IDisposable
         }
     }
 
+    private static string CurrentChannel
+    {
+        get
+        {
+            try
+            {
+                return UpdateInstaller.GetInstalledChannel(AppContext.BaseDirectory);
+            }
+            catch (InvalidOperationException)
+            {
+                return UpdateTrust.LiteChannel;
+            }
+        }
+    }
+
     public async Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        using var response = await _httpClient.GetAsync(ManifestUri, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+        var channel = CurrentChannel;
+        var manifestUri = new Uri(ManifestBaseUrl + UpdateTrust.GetManifestFileName(channel));
+        using var response = await _httpClient.GetAsync(manifestUri, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         EnsureAllowedResponse(response);
@@ -77,7 +94,7 @@ internal sealed class UpdateClient : IDisposable
         await BoundedStream.CopyToAsync(source, memory, UpdateManifestCodec.MaximumManifestSize, timeout.Token)
             .ConfigureAwait(false);
         var json = Encoding.UTF8.GetString(memory.ToArray());
-        var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, UpdateTrust.Channel);
+        var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, channel);
         return update.Version > CurrentVersion ? update : null;
     }
 
@@ -141,14 +158,17 @@ internal sealed class UpdateClient : IDisposable
         var launcherDirectory = Path.Combine(updateRoot, "launcher");
         Directory.CreateDirectory(launcherDirectory);
         var launcherPath = Path.Combine(launcherDirectory, "PinNote.Updater.exe");
-        foreach (var fileName in new[]
-        {
-            "PinNote.Updater.exe",
-            "PinNote.Updater.dll",
-            "PinNote.Updater.deps.json",
-            "PinNote.Updater.runtimeconfig.json",
-            "PinNote.Core.dll"
-        })
+        var launcherFiles = update.Channel == UpdateTrust.FullChannel
+            ? new[] { "PinNote.Updater.exe" }
+            : new[]
+            {
+                "PinNote.Updater.exe",
+                "PinNote.Updater.dll",
+                "PinNote.Updater.deps.json",
+                "PinNote.Updater.runtimeconfig.json",
+                "PinNote.Core.dll"
+            };
+        foreach (var fileName in launcherFiles)
         {
             File.Copy(Path.Combine(AppContext.BaseDirectory, fileName), Path.Combine(launcherDirectory, fileName), overwrite: true);
         }

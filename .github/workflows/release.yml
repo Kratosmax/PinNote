@@ -37,6 +37,18 @@ jobs:
           try {
             [IO.File]::WriteAllText($keyPath, $env:PINNOTE_UPDATE_SIGNING_KEY)
             ./scripts/Build-Release.ps1 -PrivateKeyPath $keyPath
+
+            $root = "temp/release/v$version"
+            dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
+              --configuration Release --no-build -- verify `
+              --channel portable-framework-dependent `
+              --manifest "$root/update.json" `
+              --package "$root/PinNote-$version-Lite-Portable.zip"
+            dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
+              --configuration Release --no-build -- verify `
+              --channel portable-self-contained `
+              --manifest "$root/update-full.json" `
+              --package "$root/PinNote-$version-Full-Portable.zip"
           }
           finally {
             Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
@@ -51,8 +63,13 @@ jobs:
           $version = [string]$props.Project.PropertyGroup.Version
           $root = "temp/release/v$version"
           gh release create "v$version" `
-            "$root/PinNote-$version-portable-win-x64.zip" `
+            "$root/PinNote-$version-Full-Setup.exe" `
+            "$root/PinNote-$version-Lite-Setup.exe" `
+            "$root/PinNote-$version-Full-Portable.zip" `
+            "$root/PinNote-$version-Lite-Portable.zip" `
             "$root/update.json" `
+            "$root/update-lite.json" `
+            "$root/update-full.json" `
             "$root/SHA256SUMS.txt" `
             --title "PinNote $version" `
             --notes-file RELEASE_NOTES.md `

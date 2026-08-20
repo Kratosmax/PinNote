@@ -3,7 +3,21 @@ namespace PinNote.Core.Updates;
 public static class UpdateTrust
 {
     public const string ProductId = "PinNote.Windows.Desktop";
-    public const string Channel = "portable-framework-dependent";
+    public const string LiteChannel = "portable-framework-dependent";
+    public const string FullChannel = "portable-self-contained";
+
+    // Kept for source compatibility with the original Lite update channel.
+    public const string Channel = LiteChannel;
+
+    public static bool IsSupportedChannel(string channel) =>
+        channel is LiteChannel or FullChannel;
+
+    public static string GetManifestFileName(string channel) => channel switch
+    {
+        LiteChannel => "update.json",
+        FullChannel => "update-full.json",
+        _ => throw new InvalidDataException("不支持的更新通道。")
+    };
     public const string PublicKeyPem = """
         -----BEGIN PUBLIC KEY-----
         MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEApLInhC+QvN2wWwsk8Hbh

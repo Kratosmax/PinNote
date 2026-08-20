@@ -23,8 +23,9 @@ internal static class UpdaterProgram
             WriteLog("等待 PinNote 退出。");
             await WaitForExitAsync(processId, TimeSpan.FromSeconds(60)).ConfigureAwait(false);
 
+            var installedChannel = UpdateInstaller.GetInstalledChannel(targetDirectory);
             var manifestJson = await File.ReadAllTextAsync(manifestPath).ConfigureAwait(false);
-            var update = UpdateManifestCodec.ParseAndVerify(manifestJson, UpdateTrust.PublicKeyPem, UpdateTrust.Channel);
+            var update = UpdateManifestCodec.ParseAndVerify(manifestJson, UpdateTrust.PublicKeyPem, installedChannel);
             WriteLog($"开始安装 {update.Version}。");
             await UpdateInstaller.InstallAsync(packagePath, targetDirectory, update).ConfigureAwait(false);
 
