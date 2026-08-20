@@ -9,12 +9,12 @@ namespace PinNote.Services;
 
 internal static class VisualCaptureService
 {
-    public static void Capture(Window window, string path)
+    public static void Capture(FrameworkElement element, string path)
     {
-        var width = Math.Max(1, (int)Math.Ceiling(window.ActualWidth));
-        var height = Math.Max(1, (int)Math.Ceiling(window.ActualHeight));
+        var width = Math.Max(1, (int)Math.Ceiling(element.ActualWidth));
+        var height = Math.Max(1, (int)Math.Ceiling(element.ActualHeight));
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        bitmap.Render(element);
 
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException("The capture path has no parent directory.");

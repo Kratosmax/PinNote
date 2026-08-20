@@ -13,6 +13,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("reminder transitions preserve overdue state", TestTransitions),
     ("snapshot clone is independent", TestClone),
     ("schema normalization preserves groups and note state", TestSchema),
+    ("favorite text colors normalize and persist", TestFavoriteTextColors),
     ("update network settings normalize safely", TestUpdateNetworkSettings),
     ("update routes preserve priority and allowlist", TestUpdateRoutes),
     ("json store round-trips and creates backup", TestStore),
@@ -86,12 +87,14 @@ static Task TestClone()
     clone.Settings.ManagerHotkeyEnabled = false;
     clone.Settings.AutoUpdateEnabled = false;
     clone.Settings.SkippedUpdateVersion = "0.4.0";
+    clone.Settings.RememberFavoriteTextColor("#6B5BD2");
     Assert(snapshot.Notes[0].Title == "Original", "Cloned notes must be independent.");
     Assert(snapshot.Settings.EnableMaterial, "Cloned settings must be independent.");
     Assert(snapshot.Settings.NewNoteHotkey == "Ctrl+Shift+N" && snapshot.Settings.ManagerHotkeyEnabled,
         "Cloned shortcut settings must be independent.");
     Assert(snapshot.Settings.AutoUpdateEnabled && snapshot.Settings.SkippedUpdateVersion.Length == 0,
         "Cloned update settings must be independent.");
+    Assert(snapshot.Settings.FavoriteTextColors.Count == 0, "Cloned favorite colors must be independent.");
     clone.Groups[0].Name = "Changed group";
     Assert(snapshot.Groups[0].Name == "Work", "Cloned groups must be independent.");
     Assert(clone.Notes[0].IsHidden && clone.Notes[0].GroupId == clone.Groups[0].Id, "Clone must preserve note management state.");
@@ -129,6 +132,23 @@ static Task TestSchema()
         "Missing shortcut values should normalize to defaults.");
     Assert(!snapshot.Settings.NewNoteHotkeyEnabled, "Shortcut enabled state should survive normalization.");
     Assert(snapshot.Settings.AutoUpdateEnabled, "Legacy settings should enable automatic update checks by default.");
+    return Task.CompletedTask;
+}
+
+static Task TestFavoriteTextColors()
+{
+    var settings = new AppSettings
+    {
+        FavoriteTextColors = [" #abcdef ", "invalid", "#ABCDEF", "#147D76", "#123456", "#654321", "#FEDCBA"]
+    };
+    settings.Normalize();
+    Assert(settings.FavoriteTextColors.SequenceEqual(["#ABCDEF", "#123456", "#654321"]),
+        "Favorite colors should normalize, de-duplicate, exclude permanent colors, and keep three slots.");
+    Assert(settings.RememberFavoriteTextColor("#fedcba"), "A new favorite color should be remembered.");
+    Assert(settings.FavoriteTextColors.SequenceEqual(["#FEDCBA", "#ABCDEF", "#123456"]),
+        "The newest favorite should move to the first slot and evict the oldest.");
+    Assert(!settings.RememberFavoriteTextColor("#202428"), "Permanent colors should not consume favorite slots.");
+    Assert(!settings.RememberFavoriteTextColor("not-a-color"), "Invalid colors should be ignored.");
     return Task.CompletedTask;
 }
 
@@ -262,11 +282,11 @@ static async Task TestUpdatePackage()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 5, 0);
+        var version = CurrentTestVersion();
         var packagePath = await CreatePackageAsync(root, version);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
-        Assert(validated.Metadata.Version == "0.5.0", "Package metadata should match the signed version.");
+        Assert(validated.Metadata.Version == version.ToString(3), "Package metadata should match the signed version.");
 
         var target = Path.Combine(root, "install");
         Directory.CreateDirectory(target);
@@ -287,7 +307,7 @@ static async Task TestFullUpdatePackage()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 5, 0);
+        var version = CurrentTestVersion();
         var packagePath = await CreatePackageAsync(root, version, channel: UpdateTrust.FullChannel);
         var update = await CreateUpdateInfoAsync(packagePath, version, UpdateTrust.FullChannel);
         var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
@@ -305,7 +325,7 @@ static async Task TestUpdateRollback()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 5, 0);
+        var version = CurrentTestVersion();
         var packagePath = await CreatePackageAsync(root, version, includeLockedFile: true);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var target = Path.Combine(root, "install");
@@ -333,6 +353,13 @@ static string CreateTestDirectory()
     var directory = Path.Combine(baseDirectory, Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(directory);
     return directory;
+}
+
+static Version CurrentTestVersion()
+{
+    var version = typeof(UpdateTrust).Assembly.GetName().Version
+        ?? throw new InvalidOperationException("The test assembly has no version.");
+    return new Version(version.Major, version.Minor, version.Build);
 }
 
 static async Task<string> CreatePackageAsync(
@@ -431,6 +458,7 @@ static async Task TestStore()
         };
         snapshot.Settings.NewNoteHotkey = "Ctrl+Alt+J";
         snapshot.Settings.ManagerHotkeyEnabled = false;
+        snapshot.Settings.RememberFavoriteTextColor("#6B5BD2");
         snapshot.Notes[0].GroupId = snapshot.Groups[0].Id;
 
         await store.SaveAsync(snapshot);
@@ -441,6 +469,8 @@ static async Task TestStore()
         Assert(loaded.Groups.Count == 1 && loaded.Notes[0].GroupId == loaded.Groups[0].Id, "Groups should round-trip.");
         Assert(loaded.Settings.NewNoteHotkey == "Ctrl+Alt+J" && !loaded.Settings.ManagerHotkeyEnabled,
             "Shortcut settings should round-trip.");
+        Assert(loaded.Settings.FavoriteTextColors.SequenceEqual(["#6B5BD2"]),
+            "Favorite text colors should round-trip.");
 
         loaded.Notes[0].Title = "Second save";
         await store.SaveAsync(loaded);

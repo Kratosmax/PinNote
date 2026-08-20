@@ -13,5 +13,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PinNote.Core\PinNote.Core.csproj" />
+    <Resource Include="..\..\temp\assets\pinnote.ico" Link="Assets\pinnote.ico" />
   </ItemGroup>
 </Project>

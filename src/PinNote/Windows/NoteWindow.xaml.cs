@@ -18,22 +18,27 @@ public sealed partial class NoteWindow : Window
     private static readonly System.Windows.Media.Brush OverdueBorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(213, 154, 58));
     private readonly NoteDocument _note;
     private readonly Func<bool> _materialEnabled;
+    private readonly Func<IReadOnlyList<string>> _favoriteTextColors;
     private bool _initializing = true;
+    private bool _suppressSelectionAnimation;
     private bool _allowClose;
 
-    public NoteWindow(NoteDocument note, Func<bool> materialEnabled)
+    public NoteWindow(NoteDocument note, Func<bool> materialEnabled, Func<IReadOnlyList<string>> favoriteTextColors)
     {
         InitializeComponent();
         _note = note;
         _materialEnabled = materialEnabled;
+        _favoriteTextColors = favoriteTextColors;
         if (Environment.GetEnvironmentVariable("PINNOTE_VISUAL_QA") == "1")
         {
             ShowInTaskbar = true;
         }
 
         ReminderHour.ItemsSource = Enumerable.Range(0, 24).Select(value => value.ToString("00")).ToArray();
-        ReminderMinute.ItemsSource = Enumerable.Range(0, 12).Select(value => (value * 5).ToString("00")).ToArray();
+        ReminderMinute.ItemsSource = Enumerable.Range(0, 60).Select(value => value.ToString("00")).ToArray();
+        ReminderSecond.ItemsSource = Enumerable.Range(0, 60).Select(value => value.ToString("00")).ToArray();
         LoadFromModel();
+        RefreshFavoriteTextColors();
         _initializing = false;
     }
 
@@ -48,6 +53,8 @@ public sealed partial class NoteWindow : Window
     public event Action<NoteWindow>? DeleteRequested;
 
     public event Action<NoteWindow>? HideRequested;
+
+    public event Action<string>? FavoriteTextColorAdded;
 
     private void LoadFromModel()
     {
@@ -96,14 +103,23 @@ public sealed partial class NoteWindow : Window
 
     private void PopulateReminderEditor()
     {
-        var due = _note.ReminderAt?.LocalDateTime ?? RoundToFiveMinutes(DateTime.Now.AddHours(1));
-        ReminderDate.SelectedDate = due.Date;
-        ReminderHour.SelectedItem = due.Hour.ToString("00");
-        ReminderMinute.SelectedItem = (due.Minute / 5 * 5).ToString("00");
-        LevelWeak.IsChecked = _note.ReminderLevel == ReminderLevel.Weak;
-        LevelNormal.IsChecked = _note.ReminderLevel == ReminderLevel.Normal;
-        LevelStrong.IsChecked = _note.ReminderLevel == ReminderLevel.Strong;
-        LevelUltra.IsChecked = _note.ReminderLevel == ReminderLevel.Ultra;
+        _suppressSelectionAnimation = true;
+        try
+        {
+            var due = _note.ReminderAt?.LocalDateTime ?? TrimMilliseconds(DateTime.Now.AddHours(1));
+            ReminderDate.SelectedDate = due.Date;
+            ReminderHour.SelectedItem = due.Hour.ToString("00");
+            ReminderMinute.SelectedItem = due.Minute.ToString("00");
+            ReminderSecond.SelectedItem = due.Second.ToString("00");
+            LevelWeak.IsChecked = _note.ReminderLevel == ReminderLevel.Weak;
+            LevelNormal.IsChecked = _note.ReminderLevel == ReminderLevel.Normal;
+            LevelStrong.IsChecked = _note.ReminderLevel == ReminderLevel.Strong;
+            LevelUltra.IsChecked = _note.ReminderLevel == ReminderLevel.Ultra;
+        }
+        finally
+        {
+            _suppressSelectionAnimation = false;
+        }
     }
 
     public string GetPlainText()
@@ -222,11 +238,11 @@ public sealed partial class NoteWindow : Window
         var level = LevelLabel(_note.ReminderLevel);
         if (_note.IsOverdue(DateTimeOffset.Now))
         {
-            ReminderStatus.Text = $"已逾期 · {due.LocalDateTime:MM-dd HH:mm} · {level}";
+            ReminderStatus.Text = $"已逾期 · {due.LocalDateTime:MM-dd HH:mm:ss} · {level}";
         }
         else
         {
-            ReminderStatus.Text = $"{due.LocalDateTime:MM-dd HH:mm} · {level}";
+            ReminderStatus.Text = $"{due.LocalDateTime:MM-dd HH:mm:ss} · {level}";
         }
         SetStaticReminderVisual();
     }
@@ -336,12 +352,16 @@ public sealed partial class NoteWindow : Window
     {
         if (ReminderDate.SelectedDate is not { } date ||
             ReminderHour.SelectedItem is not string hourText ||
-            ReminderMinute.SelectedItem is not string minuteText)
+            ReminderMinute.SelectedItem is not string minuteText ||
+            ReminderSecond.SelectedItem is not string secondText)
         {
             return;
         }
 
-        var local = date.Date.AddHours(int.Parse(hourText)).AddMinutes(int.Parse(minuteText));
+        var local = date.Date
+            .AddHours(int.Parse(hourText))
+            .AddMinutes(int.Parse(minuteText))
+            .AddSeconds(int.Parse(secondText));
         ReminderStateMachine.Schedule(_note, new DateTimeOffset(local), SelectedReminderLevel());
         ReminderPanel.Visibility = Visibility.Collapsed;
         RefreshReminderStatus();
@@ -353,15 +373,25 @@ public sealed partial class NoteWindow : Window
         var now = DateTime.Now;
         var due = (((FrameworkElement)sender).Tag as string) switch
         {
-            "hour" => RoundToFiveMinutes(now.AddHours(1)),
+            "hour" => TrimMilliseconds(now.AddHours(1)),
             "today" when now.TimeOfDay < TimeSpan.FromHours(18) => now.Date.AddHours(18),
             "today" => now.Date.AddDays(1).AddHours(18),
             "tomorrow" => now.Date.AddDays(1).AddHours(9),
-            _ => RoundToFiveMinutes(now.AddHours(1))
+            _ => TrimMilliseconds(now.AddHours(1))
         };
-        ReminderDate.SelectedDate = due.Date;
-        ReminderHour.SelectedItem = due.Hour.ToString("00");
-        ReminderMinute.SelectedItem = (due.Minute / 5 * 5).ToString("00");
+        _suppressSelectionAnimation = true;
+        try
+        {
+            ReminderDate.SelectedDate = due.Date;
+            ReminderHour.SelectedItem = due.Hour.ToString("00");
+            ReminderMinute.SelectedItem = due.Minute.ToString("00");
+            ReminderSecond.SelectedItem = due.Second.ToString("00");
+        }
+        finally
+        {
+            _suppressSelectionAnimation = false;
+        }
+        AnimateTimeSelection();
     }
 
     private ReminderLevel SelectedReminderLevel()
@@ -442,6 +472,163 @@ public sealed partial class NoteWindow : Window
 
     private void InkCoral_Click(object sender, RoutedEventArgs e) => ApplyInk(System.Windows.Media.Color.FromRgb(201, 91, 82));
 
+    private void TextColorMenu_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshFavoriteTextColors();
+        TextColorPopup.IsOpen = !TextColorPopup.IsOpen;
+    }
+
+    private void ChooseTextColor_Click(object sender, RoutedEventArgs e) => ChooseTextColor();
+
+    private void ChooseTextColor()
+    {
+        using var dialog = new System.Windows.Forms.ColorDialog
+        {
+            AllowFullOpen = true,
+            AnyColor = true,
+            FullOpen = true,
+            SolidColorOnly = true
+        };
+        var owner = new Win32DialogOwner(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+        if (dialog.ShowDialog(owner) != System.Windows.Forms.DialogResult.OK)
+        {
+            return;
+        }
+
+        var color = System.Windows.Media.Color.FromRgb(dialog.Color.R, dialog.Color.G, dialog.Color.B);
+        ApplyInk(color);
+        FavoriteTextColorAdded?.Invoke($"#{color.R:X2}{color.G:X2}{color.B:X2}");
+        RefreshFavoriteTextColors();
+        TextColorPopup.IsOpen = false;
+    }
+
+    public void RefreshFavoriteTextColors()
+    {
+        FavoriteColorPanel.Children.Clear();
+        var colors = _favoriteTextColors();
+        for (var index = 0; index < 3; index++)
+        {
+            var button = new Button
+            {
+                Width = 40,
+                Height = 32,
+                Margin = new Thickness(2),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            if (index < colors.Count &&
+                System.Windows.Media.ColorConverter.ConvertFromString(colors[index]) is System.Windows.Media.Color color)
+            {
+                button.Background = new SolidColorBrush(color);
+                button.BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(70, color.R, color.G, color.B));
+                button.Tag = color;
+                button.ToolTip = $"常用颜色 {colors[index]}";
+                button.Click += FavoriteTextColor_Click;
+            }
+            else
+            {
+                button.Background = Brushes.Transparent;
+                button.BorderBrush = (Brush)FindResource("BorderBrush");
+                button.Content = "+";
+                button.FontSize = 18;
+                button.Foreground = (Brush)FindResource("TextSecondaryBrush");
+                button.ToolTip = $"添加常用颜色 {index + 1}";
+                button.Click += ChooseTextColor_Click;
+            }
+            FavoriteColorPanel.Children.Add(button);
+        }
+    }
+
+    private void FavoriteTextColor_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: System.Windows.Media.Color color })
+        {
+            ApplyInk(color);
+            TextColorPopup.IsOpen = false;
+        }
+    }
+
+    private void TimeSelection_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _suppressSelectionAnimation || TimePickerSurface is null)
+        {
+            return;
+        }
+
+        AnimateTimeSelection();
+    }
+
+    private void AnimateTimeSelection()
+    {
+        var from = System.Windows.Media.Color.FromArgb(54, 20, 125, 118);
+        var to = System.Windows.Media.Color.FromArgb(0, 20, 125, 118);
+        var brush = new SolidColorBrush(from);
+        TimePickerSurface.Background = brush;
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation
+        {
+            From = from,
+            To = to,
+            Duration = TimeSpan.FromMilliseconds(420),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        });
+    }
+
+    private void ReminderLevel_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _suppressSelectionAnimation || sender is not RadioButton button)
+        {
+            return;
+        }
+
+        button.RenderTransformOrigin = new Point(0.5, 0.5);
+        var scale = new ScaleTransform(0.96, 0.96);
+        button.RenderTransform = scale;
+        var easing = new BackEase { Amplitude = 0.18, EasingMode = EasingMode.EaseOut };
+        var animation = new DoubleAnimation(0.96, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = easing };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, animation);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, animation);
+        button.BeginAnimation(OpacityProperty, new DoubleAnimation(0.72, 1, TimeSpan.FromMilliseconds(160)));
+    }
+
+    internal void OpenTextColorPaletteForVisualTest()
+    {
+        RefreshFavoriteTextColors();
+        TextColorPopup.IsOpen = true;
+    }
+
+    internal void CloseTextColorPaletteForVisualTest() => TextColorPopup.IsOpen = false;
+
+    internal FrameworkElement TextColorPaletteVisualForTest => (FrameworkElement)TextColorPopup.Child;
+
+    internal void ConfigurePreciseReminderForVisualTest()
+    {
+        ReminderPanel.Visibility = Visibility.Visible;
+        _suppressSelectionAnimation = true;
+        try
+        {
+            ReminderHour.SelectedItem = "14";
+            ReminderMinute.SelectedItem = "37";
+            ReminderSecond.SelectedItem = "42";
+            LevelStrong.IsChecked = true;
+        }
+        finally
+        {
+            _suppressSelectionAnimation = false;
+        }
+    }
+
+    internal ToolTip OpenReminderTooltipForVisualTest()
+    {
+        var tooltip = new ToolTip
+        {
+            Content = LevelUltra.ToolTip,
+            PlacementTarget = LevelUltra,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            IsOpen = true
+        };
+        return tooltip;
+    }
+
     private void ApplyInk(System.Windows.Media.Color color)
     {
         Editor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, new SolidColorBrush(color));
@@ -457,10 +644,12 @@ public sealed partial class NoteWindow : Window
         _ => "提醒"
     };
 
-    private static DateTime RoundToFiveMinutes(DateTime value)
+    private static DateTime TrimMilliseconds(DateTime value) =>
+        new(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
+
+    private sealed class Win32DialogOwner(nint handle) : System.Windows.Forms.IWin32Window
     {
-        var ticks = TimeSpan.FromMinutes(5).Ticks;
-        return new DateTime(((value.Ticks + ticks - 1) / ticks) * ticks, value.Kind);
+        public nint Handle { get; } = handle;
     }
 
 }

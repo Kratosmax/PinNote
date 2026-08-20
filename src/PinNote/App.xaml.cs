@@ -21,6 +21,7 @@ public sealed partial class App : System.Windows.Application
     private readonly Dictionary<Guid, ReminderWindow> _reminderWindows = [];
     private Mutex? _singleInstanceMutex;
     private Forms.NotifyIcon? _trayIcon;
+    private System.Drawing.Icon? _trayIconImage;
     private ManagerWindow? _managerWindow;
     private NoteSnapshot _snapshot = new();
     private SaveCoordinator? _saveCoordinator;
@@ -154,22 +155,38 @@ public sealed partial class App : System.Windows.Application
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("退出", null, async (_, _) => await Dispatcher.InvokeAsync(ExitApplication));
 
-        var executableIcon = !string.IsNullOrWhiteSpace(Environment.ProcessPath)
-            ? System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath)
-            : null;
+        _trayIconImage = LoadTrayIcon();
         _trayIcon = new Forms.NotifyIcon
         {
             Text = "PinNote",
-            Icon = executableIcon ?? System.Drawing.SystemIcons.Application,
+            Icon = _trayIconImage ?? System.Drawing.SystemIcons.Application,
             Visible = true,
             ContextMenuStrip = menu
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowManager);
     }
 
+    private static System.Drawing.Icon? LoadTrayIcon()
+    {
+        var resource = GetResourceStream(new Uri("pack://application:,,,/Assets/pinnote.ico"));
+        if (resource is not null)
+        {
+            using var stream = resource.Stream;
+            using var icon = new System.Drawing.Icon(stream, Forms.SystemInformation.SmallIconSize);
+            return (System.Drawing.Icon)icon.Clone();
+        }
+
+        return !string.IsNullOrWhiteSpace(Environment.ProcessPath)
+            ? System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath)
+            : null;
+    }
+
     private NoteWindow CreateNoteWindow(NoteDocument note)
     {
-        var window = new NoteWindow(note, () => _snapshot.Settings.EnableMaterial);
+        var window = new NoteWindow(
+            note,
+            () => _snapshot.Settings.EnableMaterial,
+            () => _snapshot.Settings.FavoriteTextColors);
         window.Changed += changedWindow =>
         {
             changedWindow.Note.ModifiedAt = DateTimeOffset.Now;
@@ -184,9 +201,24 @@ public sealed partial class App : System.Windows.Application
         window.NewRequested += _ => CreateNewNote();
         window.DeleteRequested += DeleteNote;
         window.HideRequested += changedWindow => SetNoteVisibility(changedWindow.Note, visible: false);
+        window.FavoriteTextColorAdded += RememberFavoriteTextColor;
         _noteWindows[note.Id] = window;
         _ = new WindowInteropHelper(window).EnsureHandle();
         return window;
+    }
+
+    private void RememberFavoriteTextColor(string color)
+    {
+        if (!_snapshot.Settings.RememberFavoriteTextColor(color))
+        {
+            return;
+        }
+
+        foreach (var window in _noteWindows.Values)
+        {
+            window.RefreshFavoriteTextColors();
+        }
+        MarkDirty();
     }
 
     private NoteDocument CreateDefaultNote()
@@ -671,6 +703,34 @@ public sealed partial class App : System.Windows.Application
         await Task.Delay(120);
         VisualCaptureService.Capture(window, Path.Combine(directory, "note-long-reminder.png"));
 
+        window.ConfigurePreciseReminderForVisualTest();
+        await Task.Delay(120);
+        VisualCaptureService.Capture(window, Path.Combine(directory, "precise-time-animation.png"));
+        var reminderTooltip = window.OpenReminderTooltipForVisualTest();
+        try
+        {
+            await Task.Delay(100);
+            VisualCaptureService.Capture(reminderTooltip, Path.Combine(directory, "reminder-level-tooltip.png"));
+        }
+        finally
+        {
+            reminderTooltip.IsOpen = false;
+        }
+
+        _snapshot.Settings.RememberFavoriteTextColor("#6B5BD2");
+        _snapshot.Settings.RememberFavoriteTextColor("#D68A2D");
+        _snapshot.Settings.RememberFavoriteTextColor("#3A86C8");
+        window.OpenTextColorPaletteForVisualTest();
+        try
+        {
+            await Task.Delay(150);
+            VisualCaptureService.Capture(window.TextColorPaletteVisualForTest, Path.Combine(directory, "text-color-palette.png"));
+        }
+        finally
+        {
+            window.CloseTextColorPaletteForVisualTest();
+        }
+
         ReminderStateMachine.Schedule(window.Note, DateTimeOffset.Now.AddMinutes(-8), ReminderLevel.Normal);
         window.ConfigureVisualTest(window.Note.Title, window.GetPlainText(), showReminderEditor: false);
         window.RefreshReminderStatus();
@@ -793,6 +853,7 @@ public sealed partial class App : System.Windows.Application
         _managerWindow?.AllowCloseAndClose();
 
         _trayIcon?.Dispose();
+        _trayIconImage?.Dispose();
         _reminderScheduler?.Dispose();
         _updateTimer?.Dispose();
         _globalHotkeyService?.Dispose();
