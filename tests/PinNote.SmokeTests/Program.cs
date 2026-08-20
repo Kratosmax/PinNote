@@ -13,6 +13,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("reminder transitions preserve overdue state", TestTransitions),
     ("snapshot clone is independent", TestClone),
     ("schema normalization preserves groups and note state", TestSchema),
+    ("update network settings normalize safely", TestUpdateNetworkSettings),
+    ("update routes preserve priority and allowlist", TestUpdateRoutes),
     ("json store round-trips and creates backup", TestStore),
     ("signed update manifest rejects tampering", TestUpdateManifest),
     ("update channels reject cross-channel manifests", TestUpdateChannels),
@@ -130,6 +132,59 @@ static Task TestSchema()
     return Task.CompletedTask;
 }
 
+static Task TestUpdateNetworkSettings()
+{
+    var settings = new UpdateNetworkSettings(
+    [
+        new GithubProxySetting("https://mirror.example/github/", 5),
+        new GithubProxySetting("https://MIRROR.example/github", 8),
+        new GithubProxySetting(string.Empty, 0, true),
+        new GithubProxySetting(string.Empty, 10, true)
+    ], "http://127.0.0.1:7890").Normalize();
+    Assert(settings.GithubProxies!.Count == 2, "Duplicate proxies and duplicate direct routes should collapse.");
+    Assert(settings.GithubProxies.Count(item => item.IsDirect) == 1, "Exactly one direct route must remain.");
+    Assert(settings.GithubProxies.Single(item => !item.IsDirect).BaseUrl == "https://mirror.example/github",
+        "Proxy trailing slashes should normalize.");
+    Assert(settings.HttpProxy == "http://127.0.0.1:7890", "HTTP proxy authority should normalize.");
+    Assert(!UpdateNetworkSettings.TryNormalizeGithubProxy("https://user:secret@proxy.example/path", out _),
+        "Proxy credentials must be rejected.");
+    Assert(!UpdateNetworkSettings.TryNormalizeGithubProxy("https://proxy.example/?token=secret", out _),
+        "Proxy query strings must be rejected.");
+    Assert(!UpdateNetworkSettings.TryNormalizeHttpProxy("https://127.0.0.1:7890", out _),
+        "Only the supported HTTP proxy scheme should be accepted.");
+    Assert(!UpdateNetworkSettings.TryNormalizeHttpProxy("http://127.0.0.1:7890/path", out _),
+        "HTTP proxy paths must be rejected.");
+    return Task.CompletedTask;
+}
+
+static Task TestUpdateRoutes()
+{
+    var original = new Uri("https://github.com/Kratosmax/PinNote/releases/latest/download/update.json");
+    var settings = new UpdateNetworkSettings(
+    [
+        new GithubProxySetting(string.Empty, 3, true),
+        new GithubProxySetting("https://first.example", 7),
+        new GithubProxySetting("https://second.example/prefix", 7),
+        new GithubProxySetting("https://disabled.example", 0)
+    ]);
+    var routes = UpdateRouteBuilder.Build(original, settings);
+    Assert(routes.Count == 3, "Priority zero routes should be disabled.");
+    Assert(routes[0].RequestUri.Host == "first.example" && routes[1].RequestUri.Host == "second.example",
+        "Equal-priority proxy routes should preserve list order.");
+    Assert(routes[2].IsDirect && routes[2].RequestUri == original, "Lower-priority direct should remain as fallback.");
+    Assert(routes[1].RequestUri.AbsoluteUri == $"https://second.example/prefix/{original.AbsoluteUri}",
+        "Path prefixes should compose deterministically.");
+
+    var external = new Uri("https://example.com/update.json");
+    var externalRoutes = UpdateRouteBuilder.Build(external, settings);
+    Assert(externalRoutes.Count == 1 && externalRoutes[0].RequestUri == external,
+        "Non-GitHub URLs must never be sent through prefix proxies.");
+    var disabled = new UpdateNetworkSettings([new GithubProxySetting(string.Empty, 0, true)]);
+    Assert(UpdateRouteBuilder.Build(original, disabled).Count == 0,
+        "The routing layer must reject an all-disabled configuration with no candidate requests.");
+    return Task.CompletedTask;
+}
+
 static Task TestUpdateManifest()
 {
     using var rsa = RSA.Create(2048);
@@ -207,11 +262,11 @@ static async Task TestUpdatePackage()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 4, 1);
+        var version = new Version(0, 5, 0);
         var packagePath = await CreatePackageAsync(root, version);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
-        Assert(validated.Metadata.Version == "0.4.1", "Package metadata should match the signed version.");
+        Assert(validated.Metadata.Version == "0.5.0", "Package metadata should match the signed version.");
 
         var target = Path.Combine(root, "install");
         Directory.CreateDirectory(target);
@@ -232,7 +287,7 @@ static async Task TestFullUpdatePackage()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 4, 1);
+        var version = new Version(0, 5, 0);
         var packagePath = await CreatePackageAsync(root, version, channel: UpdateTrust.FullChannel);
         var update = await CreateUpdateInfoAsync(packagePath, version, UpdateTrust.FullChannel);
         var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
@@ -250,7 +305,7 @@ static async Task TestUpdateRollback()
     var root = CreateTestDirectory();
     try
     {
-        var version = new Version(0, 4, 1);
+        var version = new Version(0, 5, 0);
         var packagePath = await CreatePackageAsync(root, version, includeLockedFile: true);
         var update = await CreateUpdateInfoAsync(packagePath, version);
         var target = Path.Combine(root, "install");

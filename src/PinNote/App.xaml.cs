@@ -349,7 +349,7 @@ public sealed partial class App : System.Windows.Application
         var window = new SettingsWindow(
             _snapshot.Settings,
             TryApplySettings,
-            () => CheckForUpdatesAsync(manual: true),
+            network => CheckForUpdatesAsync(manual: true, network),
             UpdateClient.CurrentVersion)
         {
             Owner = _noteWindows.Values.FirstOrDefault(note => note.IsVisible)
@@ -402,7 +402,7 @@ public sealed partial class App : System.Windows.Application
             TimeSpan.FromHours(24));
     }
 
-    private async Task<string> CheckForUpdatesAsync(bool manual)
+    private async Task<string> CheckForUpdatesAsync(bool manual, UpdateNetworkSettings? networkSettings = null)
     {
         if (_updateClient is null)
         {
@@ -415,7 +415,8 @@ public sealed partial class App : System.Windows.Application
 
         try
         {
-            var update = await _updateClient.CheckAsync();
+            var effectiveNetwork = (networkSettings ?? _snapshot.Settings.UpdateNetwork).Normalize();
+            var update = await _updateClient.CheckAsync(effectiveNetwork);
             if (update is null)
             {
                 return $"已是最新版本 {UpdateClient.CurrentVersion.ToString(3)}。";
@@ -425,7 +426,7 @@ public sealed partial class App : System.Windows.Application
                 return "此版本已跳过。";
             }
 
-            await Dispatcher.InvokeAsync(() => ShowUpdateWindow(update));
+            await Dispatcher.InvokeAsync(() => ShowUpdateWindow(update, effectiveNetwork));
             return $"发现新版本 {update.Version.ToString(3)}。";
         }
         catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -443,7 +444,7 @@ public sealed partial class App : System.Windows.Application
         }
     }
 
-    private void ShowUpdateWindow(UpdateInfo update)
+    private void ShowUpdateWindow(UpdateInfo update, UpdateNetworkSettings networkSettings)
     {
         if (_updateWindow is { IsVisible: true })
         {
@@ -455,7 +456,7 @@ public sealed partial class App : System.Windows.Application
             update,
             _snapshot.Settings.EnableMaterial,
             _updateClient?.CanInstallInPlace == true,
-            progress => InstallUpdateAsync(update, progress),
+            progress => InstallUpdateAsync(update, progress, networkSettings),
             () =>
             {
                 _snapshot.Settings.SkippedUpdateVersion = update.Version.ToString(3);
@@ -470,7 +471,10 @@ public sealed partial class App : System.Windows.Application
         _updateWindow.Show();
     }
 
-    private async Task InstallUpdateAsync(UpdateInfo update, IProgress<int> progress)
+    private async Task InstallUpdateAsync(
+        UpdateInfo update,
+        IProgress<int> progress,
+        UpdateNetworkSettings networkSettings)
     {
         if (_updateClient is null)
         {
@@ -480,7 +484,7 @@ public sealed partial class App : System.Windows.Application
         {
             await _saveCoordinator.FlushAsync();
         }
-        var prepared = await _updateClient.DownloadAsync(update, progress);
+        var prepared = await _updateClient.DownloadAsync(update, progress, networkSettings);
         UpdateClient.LaunchUpdater(prepared);
         await ExitApplicationAsync();
     }
@@ -609,7 +613,17 @@ public sealed partial class App : System.Windows.Application
             {
                 await Task.Delay(900);
                 var window = _noteWindows.Values.First();
-                VisualCaptureService.Capture(window, capturePath);
+                if (Environment.GetEnvironmentVariable("PINNOTE_COMPOSITE_CAPTURE") == "1")
+                {
+                    window.Topmost = true;
+                    window.Activate();
+                    await Task.Delay(180);
+                    VisualCaptureService.CaptureComposited(window, capturePath);
+                }
+                else
+                {
+                    VisualCaptureService.Capture(window, capturePath);
+                }
                 var statePath = Path.ChangeExtension(capturePath, ".json");
                 var state = new
                 {
@@ -621,6 +635,7 @@ public sealed partial class App : System.Windows.Application
                     window.Top,
                     window.Topmost,
                     window.Note.PinMode,
+                    Backdrop = window.MaterialResult,
                     ProcessId = Environment.ProcessId
                 };
                 await File.WriteAllTextAsync(statePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
@@ -677,17 +692,18 @@ public sealed partial class App : System.Windows.Application
         var settings = new SettingsWindow(
             _snapshot.Settings,
             _ => null,
-            () => Task.FromResult("视觉测试"),
+            _ => Task.FromResult("视觉测试"),
             UpdateClient.CurrentVersion);
+        settings.ShowNetworkSettingsForVisualQa();
         settings.Show();
         await Task.Delay(120);
         VisualCaptureService.Capture(settings, Path.Combine(directory, "settings.png"));
         settings.Close();
 
         var visualUpdate = new UpdateInfo(
-            new Version(0, 4, 1),
+            new Version(0, 5, 0),
             UpdateTrust.Channel,
-            new Uri("https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-Lite-Portable.zip"),
+            new Uri("https://github.com/Kratosmax/PinNote/releases/download/v0.5.0/PinNote-0.5.0-Lite-Portable.zip"),
             8_400_000,
             new string('A', 64),
             "新增安全自动更新，并优化提醒窗口在高 DPI 下的稳定性。\n\n下载后会验证签名、哈希与包内版本。",
@@ -779,7 +795,6 @@ public sealed partial class App : System.Windows.Application
         _trayIcon?.Dispose();
         _reminderScheduler?.Dispose();
         _updateTimer?.Dispose();
-        _updateClient?.Dispose();
         _globalHotkeyService?.Dispose();
         _saveCoordinator?.Dispose();
         _singleInstanceMutex?.ReleaseMutex();

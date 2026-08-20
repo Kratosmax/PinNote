@@ -18,6 +18,8 @@ public sealed class AppSettings
 
     public string ManagerHotkey { get; set; } = "Ctrl+Shift+B";
 
+    public UpdateNetworkSettings UpdateNetwork { get; set; } = UpdateNetworkSettings.Default;
+
     public AppSettings Clone() => new()
     {
         StartWithWindows = StartWithWindows,
@@ -27,7 +29,8 @@ public sealed class AppSettings
         NewNoteHotkeyEnabled = NewNoteHotkeyEnabled,
         NewNoteHotkey = NewNoteHotkey,
         ManagerHotkeyEnabled = ManagerHotkeyEnabled,
-        ManagerHotkey = ManagerHotkey
+        ManagerHotkey = ManagerHotkey,
+        UpdateNetwork = new UpdateNetworkSettings(UpdateNetwork.GithubProxies?.ToList(), UpdateNetwork.HttpProxy).Normalize()
     };
 
     public void CopyFrom(AppSettings source)
@@ -41,6 +44,7 @@ public sealed class AppSettings
         NewNoteHotkey = source.NewNoteHotkey;
         ManagerHotkeyEnabled = source.ManagerHotkeyEnabled;
         ManagerHotkey = source.ManagerHotkey;
+        UpdateNetwork = new UpdateNetworkSettings(source.UpdateNetwork.GithubProxies?.ToList(), source.UpdateNetwork.HttpProxy).Normalize();
     }
 
     public void Normalize()
@@ -48,5 +52,6 @@ public sealed class AppSettings
         NewNoteHotkey = string.IsNullOrWhiteSpace(NewNoteHotkey) ? "Ctrl+Shift+N" : NewNoteHotkey.Trim();
         ManagerHotkey = string.IsNullOrWhiteSpace(ManagerHotkey) ? "Ctrl+Shift+B" : ManagerHotkey.Trim();
         SkippedUpdateVersion = SkippedUpdateVersion?.Trim() ?? string.Empty;
+        UpdateNetwork = (UpdateNetwork ?? UpdateNetworkSettings.Default).Normalize();
     }
 }

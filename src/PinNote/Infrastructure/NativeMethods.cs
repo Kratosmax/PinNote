@@ -4,15 +4,16 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shell;
 using PinNote.Core.Models;
 
 namespace PinNote.Infrastructure;
 
 internal static class NativeMethods
 {
+    private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaSystemBackdropType = 38;
     private const int DwmwaUseImmersiveDarkMode = 20;
-    private const int WcaAccentPolicy = 19;
     private const int SwShownoactivate = 4;
     private const uint SwpNosize = 0x0001;
     private const uint SwpNomove = 0x0002;
@@ -33,74 +34,74 @@ internal static class NativeMethods
 
     public static void BroadcastShowExisting() => PostMessage(new nint(0xffff), ShowExistingMessage, 0, 0);
 
-    public static void ApplyBackdrop(Window window, Border surface, bool enabled)
+    public static BackdropResult ApplyBackdrop(Window window, Border surface, bool enabled, byte surfaceTintAlpha = 190)
     {
-        var isWindows11 = Environment.OSVersion.Version.Build >= 22000;
         surface.Opacity = 1;
-
-        if (!enabled)
-        {
-            surface.Background = new SolidColorBrush(Color.FromRgb(244, 247, 248));
-            return;
-        }
-
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == 0)
         {
-            return;
+            ApplyOpaqueFallback(window, surface);
+            return new BackdropResult(false, null, null);
         }
 
-        if (isWindows11)
+        if (!enabled || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)
+            || AppContext.TryGetSwitch("PinNote.DisableBackdrop", out var disabled) && disabled)
         {
-            var backdrop = 3;
-            _ = DwmSetWindowAttribute(hwnd, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
-            var dark = 0;
-            _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
-            surface.Background = new SolidColorBrush(Color.FromArgb(205, 248, 250, 250));
-        }
-        else if (TryEnableWindows10Acrylic(hwnd))
-        {
-            surface.Background = new SolidColorBrush(Color.FromArgb(208, 244, 247, 248));
-        }
-        else
-        {
-            surface.Background = new SolidColorBrush(Color.FromRgb(244, 247, 248));
-            return;
+            DisableSystemBackdrop(hwnd);
+            ApplyOpaqueFallback(window, surface);
+            return new BackdropResult(false, null, null);
         }
 
+        if (HwndSource.FromHwnd(hwnd) is { CompositionTarget: not null } source)
+        {
+            source.CompositionTarget.BackgroundColor = Colors.Transparent;
+        }
+
+        var rounded = 2;
+        _ = DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref rounded, sizeof(int));
+        var backdrop = 3;
+        var backdropResult = DwmSetWindowAttribute(hwnd, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
+        var fullWindow = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        var frameResult = DwmExtendFrameIntoClientArea(hwnd, ref fullWindow);
+        if (backdropResult != 0 || frameResult != 0)
+        {
+            DisableSystemBackdrop(hwnd);
+            ApplyOpaqueFallback(window, surface);
+            return new BackdropResult(false, backdropResult, frameResult);
+        }
+
+        var dark = 0;
+        _ = DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref dark, sizeof(int));
         window.Background = Brushes.Transparent;
-        var source = HwndSource.FromHwnd(hwnd);
-        if (source?.CompositionTarget is { } compositionTarget)
+        surface.Background = new SolidColorBrush(Color.FromArgb(surfaceTintAlpha, 248, 250, 250));
+        surface.CornerRadius = new CornerRadius(0);
+        surface.ClipToBounds = false;
+        if (WindowChrome.GetWindowChrome(window) is { } chrome)
         {
-            compositionTarget.BackgroundColor = Colors.Transparent;
+            chrome.CornerRadius = new CornerRadius(0);
+        }
+        return new BackdropResult(true, backdropResult, frameResult);
+    }
+
+    private static void ApplyOpaqueFallback(Window window, Border surface)
+    {
+        var fallback = Color.FromRgb(244, 247, 248);
+        window.Background = new SolidColorBrush(fallback);
+        surface.Background = new SolidColorBrush(fallback);
+        surface.CornerRadius = new CornerRadius(8);
+        surface.ClipToBounds = true;
+        if (WindowChrome.GetWindowChrome(window) is { } chrome)
+        {
+            chrome.CornerRadius = new CornerRadius(8);
         }
     }
 
-    private static bool TryEnableWindows10Acrylic(nint hwnd)
+    private static void DisableSystemBackdrop(nint hwnd)
     {
-        var accent = new AccentPolicy
-        {
-            AccentState = 4,
-            AccentFlags = 2,
-            GradientColor = unchecked((int)0xD0F8F7F4)
-        };
-        var size = Marshal.SizeOf<AccentPolicy>();
-        var pointer = Marshal.AllocHGlobal(size);
-        try
-        {
-            Marshal.StructureToPtr(accent, pointer, fDeleteOld: false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = WcaAccentPolicy,
-                Data = pointer,
-                SizeOfData = size
-            };
-            return SetWindowCompositionAttribute(hwnd, ref data);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(pointer);
-        }
+        var none = 1;
+        _ = DwmSetWindowAttribute(hwnd, DwmwaSystemBackdropType, ref none, sizeof(int));
+        var resetFrame = new Margins();
+        _ = DwmExtendFrameIntoClientArea(hwnd, ref resetFrame);
     }
 
     public static void ShowWithoutActivation(Window window, PinMode restoreMode)
@@ -183,28 +184,19 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct AccentPolicy
+    private struct Margins
     {
-        public int AccentState;
-        public int AccentFlags;
-        public int GradientColor;
-        public int AnimationId;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WindowCompositionAttributeData
-    {
-        public int Attribute;
-        public nint Data;
-        public int SizeOfData;
+        public int Left;
+        public int Right;
+        public int Top;
+        public int Bottom;
     }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowCompositionAttribute(nint hwnd, ref WindowCompositionAttributeData data);
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmExtendFrameIntoClientArea(nint hwnd, ref Margins margins);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -229,3 +221,5 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(nint hwnd, uint message, nint wParam, nint lParam);
 }
+
+internal sealed record BackdropResult(bool Applied, int? BackdropHResult, int? FrameHResult);

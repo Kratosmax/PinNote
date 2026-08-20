@@ -4,13 +4,14 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using PinNote.Core.Models;
 using PinNote.Core.Updates;
 
 namespace PinNote.Services;
 
 internal sealed record PreparedUpdate(string PackagePath, string ManifestPath, string LauncherPath);
 
-internal sealed class UpdateClient : IDisposable
+internal sealed class UpdateClient
 {
     private const string ManifestBaseUrl =
         "https://github.com/Kratosmax/PinNote/releases/latest/download/";
@@ -20,20 +21,6 @@ internal sealed class UpdateClient : IDisposable
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com"
     };
-    private readonly HttpClient _httpClient;
-
-    public UpdateClient()
-    {
-        var handler = new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
-            ConnectTimeout = TimeSpan.FromSeconds(10),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10)
-        };
-        _httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-        _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PinNote", CurrentVersion.ToString(3)));
-    }
-
     public static Version CurrentVersion
     {
         get
@@ -74,33 +61,59 @@ internal sealed class UpdateClient : IDisposable
         }
     }
 
-    public async Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
+    public async Task<UpdateInfo?> CheckAsync(
+        UpdateNetworkSettings? networkSettings = null,
+        CancellationToken cancellationToken = default)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(20));
         var channel = CurrentChannel;
         var manifestUri = new Uri(ManifestBaseUrl + UpdateTrust.GetManifestFileName(channel));
-        using var response = await _httpClient.GetAsync(manifestUri, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        EnsureAllowedResponse(response);
-        if (response.Content.Headers.ContentLength is > UpdateManifestCodec.MaximumManifestSize)
+        var settings = (networkSettings ?? UpdateNetworkSettings.Default).Normalize();
+        using var client = CreateClient(settings);
+        Exception? lastError = null;
+        string? lastRoute = null;
+        foreach (var route in UpdateRouteBuilder.Build(manifestUri, settings))
         {
-            throw new InvalidDataException("更新清单超过允许大小。");
+            try
+            {
+                using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                requestTimeout.CancelAfter(TimeSpan.FromSeconds(12));
+                using var response = await client.GetAsync(route.RequestUri, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token)
+                    .ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                EnsureAllowedResponse(response, route);
+                if (response.Content.Headers.ContentLength is > UpdateManifestCodec.MaximumManifestSize)
+                {
+                    throw new InvalidDataException("更新清单超过允许大小。");
+                }
+
+                await using var source = await response.Content.ReadAsStreamAsync(requestTimeout.Token).ConfigureAwait(false);
+                using var memory = new MemoryStream();
+                await BoundedStream.CopyToAsync(source, memory, UpdateManifestCodec.MaximumManifestSize, requestTimeout.Token)
+                    .ConfigureAwait(false);
+                var json = Encoding.UTF8.GetString(memory.ToArray());
+                var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, channel);
+                return update.Version > CurrentVersion ? update : null;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException
+                                               or IOException or InvalidDataException
+                                               or System.Security.Cryptography.CryptographicException)
+            {
+                lastError = exception;
+                lastRoute = route.DisplayName;
+            }
         }
 
-        await using var source = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-        using var memory = new MemoryStream();
-        await BoundedStream.CopyToAsync(source, memory, UpdateManifestCodec.MaximumManifestSize, timeout.Token)
-            .ConfigureAwait(false);
-        var json = Encoding.UTF8.GetString(memory.ToArray());
-        var update = UpdateManifestCodec.ParseAndVerify(json, UpdateTrust.PublicKeyPem, channel);
-        return update.Version > CurrentVersion ? update : null;
+        throw CreateRoutesFailedException(lastRoute, lastError);
     }
 
     public async Task<PreparedUpdate> DownloadAsync(
         UpdateInfo update,
         IProgress<int> progress,
+        UpdateNetworkSettings? networkSettings = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(update);
@@ -121,36 +134,61 @@ internal sealed class UpdateClient : IDisposable
         var packagePath = Path.Combine(updateRoot, "package.zip");
         var temporaryPath = packagePath + ".download";
         TryDelete(temporaryPath);
-        try
+        var settings = (networkSettings ?? UpdateNetworkSettings.Default).Normalize();
+        using var client = CreateClient(settings);
+        Exception? lastError = null;
+        string? lastRoute = null;
+        var downloaded = false;
+        foreach (var route in UpdateRouteBuilder.Build(update.DownloadUri, settings))
         {
-            using var response = await _httpClient.GetAsync(update.DownloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            EnsureAllowedResponse(response);
-            if (response.Content.Headers.ContentLength is { } contentLength && contentLength != update.Size)
+            try
             {
-                throw new InvalidDataException("服务器返回的更新包大小与签名清单不一致。");
+                TryDelete(temporaryPath);
+                using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                requestTimeout.CancelAfter(TimeSpan.FromSeconds(20));
+                using var response = await client.GetAsync(route.RequestUri, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token)
+                    .ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                EnsureAllowedResponse(response, route);
+                if (response.Content.Headers.ContentLength is { } contentLength && contentLength != update.Size)
+                {
+                    throw new InvalidDataException("服务器返回的更新包大小与签名清单不一致。");
+                }
+
+                await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using var destination = new FileStream(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    64 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await CopyDownloadAsync(source, destination, update.Size, progress, cancellationToken).ConfigureAwait(false);
+                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await UpdatePackageValidator.ValidateAsync(temporaryPath, update, cancellationToken).ConfigureAwait(false);
+                File.Move(temporaryPath, packagePath, overwrite: true);
+                downloaded = true;
+                break;
             }
-
-            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            await using var destination = new FileStream(
-                temporaryPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                64 * 1024,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await CopyDownloadAsync(source, destination, update.Size, progress, cancellationToken).ConfigureAwait(false);
-            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-            File.Move(temporaryPath, packagePath, overwrite: true);
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                TryDelete(temporaryPath);
+                throw;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException
+                                               or IOException or InvalidDataException
+                                               or System.Security.Cryptography.CryptographicException)
+            {
+                lastError = exception;
+                lastRoute = route.DisplayName;
+                TryDelete(temporaryPath);
+            }
         }
-        catch
+
+        if (!downloaded)
         {
-            TryDelete(temporaryPath);
-            throw;
+            throw CreateRoutesFailedException(lastRoute, lastError);
         }
-
-        await UpdatePackageValidator.ValidateAsync(packagePath, update, cancellationToken).ConfigureAwait(false);
         var manifestPath = Path.Combine(updateRoot, "update.json");
         await File.WriteAllTextAsync(manifestPath, update.RawManifest, new UTF8Encoding(false), cancellationToken)
             .ConfigureAwait(false);
@@ -194,8 +232,6 @@ internal sealed class UpdateClient : IDisposable
         _ = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 PinNote 更新器。");
     }
 
-    public void Dispose() => _httpClient.Dispose();
-
     private static async Task CopyDownloadAsync(
         Stream source,
         Stream destination,
@@ -228,13 +264,43 @@ internal sealed class UpdateClient : IDisposable
         }
     }
 
-    private static void EnsureAllowedResponse(HttpResponseMessage response)
+    private static HttpClient CreateClient(UpdateNetworkSettings settings)
+    {
+        var handler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10)
+        };
+        if (settings.HttpProxy is not null)
+        {
+            handler.Proxy = new WebProxy(settings.HttpProxy);
+            handler.UseProxy = true;
+        }
+        var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PinNote", CurrentVersion.ToString(3)));
+        return client;
+    }
+
+    private static void EnsureAllowedResponse(HttpResponseMessage response, UpdateRequestRoute route)
     {
         var responseUri = response.RequestMessage?.RequestUri;
-        if (responseUri is null || responseUri.Scheme != Uri.UriSchemeHttps || !AllowedRedirectHosts.Contains(responseUri.Host))
+        var allowed = responseUri is not null && (route.IsDirect
+            ? responseUri.Scheme == Uri.UriSchemeHttps && AllowedRedirectHosts.Contains(responseUri.Host)
+            : (responseUri.Scheme == Uri.UriSchemeHttp || responseUri.Scheme == Uri.UriSchemeHttps)
+              && string.Equals(responseUri.Host, route.RequestUri.Host, StringComparison.OrdinalIgnoreCase));
+        if (!allowed)
         {
             throw new InvalidDataException("更新请求被重定向到不受信任的地址。");
         }
+    }
+
+    private static HttpRequestException CreateRoutesFailedException(string? route, Exception? error)
+    {
+        var routeText = string.IsNullOrWhiteSpace(route) ? "无可用线路" : route;
+        var detail = error is null ? "请检查网络设置。" : error.Message;
+        return new HttpRequestException($"所有更新线路均失败。最后线路：{routeText}。{detail}", error,
+            (error as HttpRequestException)?.StatusCode);
     }
 
     private static void CleanupOldUpdates(string updatesRoot)

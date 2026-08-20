@@ -6,6 +6,7 @@
         Width="360" Height="420" MinWidth="280" MinHeight="260"
         WindowStyle="None" ResizeMode="CanResizeWithGrip"
         AllowsTransparency="False" Background="Transparent"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
         ShowInTaskbar="False"
         SourceInitialized="Window_SourceInitialized"
         Closing="Window_Closing"
@@ -13,7 +14,7 @@
         LocationChanged="Window_GeometryChanged"
         SizeChanged="Window_GeometryChanged">
     <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="8" GlassFrameThickness="0" />
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0" />
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
@@ -40,8 +41,8 @@
         </Style>
     </Window.Resources>
 
-    <Border x:Name="FrameBorder" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8"
-            Background="{StaticResource SurfaceBrush}" ClipToBounds="True">
+    <Border x:Name="FrameBorder" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0"
+            Background="Transparent" ClipToBounds="False">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="40" />

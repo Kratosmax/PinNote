@@ -26,6 +26,10 @@ public sealed partial class NoteWindow : Window
         InitializeComponent();
         _note = note;
         _materialEnabled = materialEnabled;
+        if (Environment.GetEnvironmentVariable("PINNOTE_VISUAL_QA") == "1")
+        {
+            ShowInTaskbar = true;
+        }
 
         ReminderHour.ItemsSource = Enumerable.Range(0, 24).Select(value => value.ToString("00")).ToArray();
         ReminderMinute.ItemsSource = Enumerable.Range(0, 12).Select(value => (value * 5).ToString("00")).ToArray();
@@ -132,7 +136,10 @@ public sealed partial class NoteWindow : Window
         }
     }
 
-    public void RefreshMaterial() => NativeMethods.ApplyBackdrop(this, FrameBorder, _materialEnabled());
+    internal BackdropResult MaterialResult { get; private set; } = new(false, null, null);
+
+    public void RefreshMaterial() =>
+        MaterialResult = NativeMethods.ApplyBackdrop(this, FrameBorder, _materialEnabled(), surfaceTintAlpha: 36);
 
     public void AllowCloseAndClose()
     {

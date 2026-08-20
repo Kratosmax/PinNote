@@ -2,7 +2,7 @@
 
 PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。它使用 WPF 和 .NET 8 构建，支持桌面便签、全局置顶、分级提醒、统一管理和全局快捷键，数据默认只保存在本机。
 
-当前版本：`0.4.1`
+当前版本：`0.5.0`
 
 ## 下载选择
 
@@ -25,9 +25,10 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 - 单实例运行：重复启动时激活已有管理页面，不创建重复进程。
 - 自动保存便签内容、窗口位置、尺寸、分组和显示状态。
 - 可自定义全局快捷键，也可以分别关闭。
-- Windows 11 系统背景材质；Windows 10 自动使用可读的兼容效果。
+- Windows 11 22621+ 系统背景材质；Windows 10、较早系统或 DWM 调用失败时使用清晰的不透明回退。
 - 空闲时没有键盘轮询；全局快捷键使用系统 `RegisterHotKey`。
 - 签名自动更新：低频后台检查、手动检查、跳过版本和失败回滚。
+- 双层更新代理：GitHub URL 前缀线路和可选 HTTP 网络代理。
 
 ## 使用教程
 
@@ -64,6 +65,17 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 ```
 
 从源码目录直接运行、缺少 `pinnote-install.json` 或更新器文件时不会就地覆盖，只提供 Release 下载入口。
+
+#### 网络代理
+
+在“设置 → 网络与更新”中可以配置两类相互独立的线路：
+
+- GitHub URL 前缀线路：按优先级 10 到 1 依次尝试，0 表示禁用；同优先级保持列表顺序。GitHub 直连不可删除，但可以设为 0。
+- HTTP 网络代理：接受 `http://host:port`，暂不支持账号密码、HTTPS 或 SOCKS 代理。
+
+“检查更新”会使用设置页当前尚未保存的线路测试；保存后，后台检查、手动检查和更新包下载共用同一策略。前缀线路只改写原始 `github.com` 地址，不会转发其他域名。无论使用哪条线路，清单签名、SHA-256、版本、通道和包结构校验都不会跳过。
+
+GitHub URL 前缀服务会看到完整 GitHub 下载 URL。建议优先使用可信的 HTTPS 前缀；HTTP 前缀或 HTTP 网络代理不能隐藏下载内容和流量元数据。
 
 卸载 Setup 不会删除 `%LOCALAPPDATA%\PinNote` 中的便签数据。Portable 版本也把用户数据保存在该目录，而不是 ZIP 解压目录。
 
@@ -141,7 +153,7 @@ $env:PINNOTE_TEST_TEMP = "$PWD/temp/tests"
 dotnet run --project tests/PinNote.SmokeTests/PinNote.SmokeTests.csproj --configuration Release --no-build
 ```
 
-测试覆盖提醒状态机、数据克隆、旧数据归一化、分组和隐藏状态、窗口几何信息、快捷键设置、JSON 原子保存/备份恢复，以及清单签名、防篡改、不可 Seek 流、真实 ZIP 校验、安装和回滚。
+测试覆盖提醒状态机、数据克隆、旧数据归一化、分组和隐藏状态、窗口几何信息、快捷键设置、代理规范化与稳定路由、JSON 原子保存/备份恢复，以及清单签名、防篡改、不可 Seek 流、真实 ZIP 校验、安装和回滚。
 
 ### 本地运行
 
@@ -169,7 +181,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 产物目录：
 
 ```text
-temp/release/v0.4.1/
+temp/release/v0.5.0/
 ```
 
 独立复核真实 ZIP 和签名清单：
@@ -178,14 +190,14 @@ temp/release/v0.4.1/
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-framework-dependent `
-  --manifest temp/release/v0.4.1/update.json `
-  --package temp/release/v0.4.1/PinNote-0.4.1-Lite-Portable.zip
+  --manifest temp/release/v0.5.0/update.json `
+  --package temp/release/v0.5.0/PinNote-0.5.0-Lite-Portable.zip
 
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-self-contained `
-  --manifest temp/release/v0.4.1/update-full.json `
-  --package temp/release/v0.4.1/PinNote-0.4.1-Full-Portable.zip
+  --manifest temp/release/v0.5.0/update-full.json `
+  --package temp/release/v0.5.0/PinNote-0.5.0-Full-Portable.zip
 ```
 
 ### GitHub 发布流程
@@ -214,6 +226,7 @@ Directory.Build.props        唯一版本来源、统一编译规则与 temp 输
 - `src/PinNote/Services/GlobalHotkeyService.cs`：系统级快捷键注册。
 - `src/PinNote.Core/Storage/JsonNoteStore.cs`：原子写入和备份恢复。
 - `src/PinNote.Core/Updates/`：清单验签、包校验和事务式安装。
+- `src/PinNote.Core/Models/UpdateNetworkSettings.cs`：代理地址校验、去重和旧配置默认值。
 - `src/PinNote/Services/UpdateClient.cs`：联网检查、受限下载和更新器交接。
 - `src/PinNote/Windows/NoteWindow.xaml`：便签界面。
 - `src/PinNote/Windows/ManagerWindow.xaml`：统一管理页面。
@@ -243,6 +256,7 @@ src/PinNote.Core/Storage/JsonNoteStore.cs 和现有测试，再提出最小改�
 7. **提交前验证**：至少完成 Release 构建、冒烟测试、敏感文件检查和 `git diff` 审阅。
 8. **保护更新信任链**：不得替换内置公钥而不安排安全迁移；私钥只能进入 GitHub Secret 或本机 `temp`，不得写入源码、日志和 Release。
 9. **保持通道一致**：Lite 使用 `portable-framework-dependent`，Full 使用 `portable-self-contained`；清单、ZIP 元数据和已安装标记必须一致，禁止跨通道更新。
+10. **保持代理信任边界**：URL 前缀仅允许原始 `github.com`，所有线路继续执行相同的签名、哈希、版本和包结构校验。
 
 ### AI 交付清单
 
@@ -263,4 +277,4 @@ git diff --check
 - 当前没有账号、云同步或多人协作。
 - 自动更新支持官方 Lite 和 Full 两条通道，不支持源码构建目录或跨通道更新。
 - Setup 和程序文件当前没有 Windows Authenticode 代码签名；更新真实性由 RSA 清单签名与 SHA-256 保证，因此 Windows 可能显示未知发布者提示。
-- `0.4.0` 是自动更新协议的首个版本，也是 `0.4.1` Lite 兼容回归的上一正式版本。
+- `0.4.0` 是自动更新协议的首个版本；发布候选必须至少从上一正式版本完成真实升级回归。

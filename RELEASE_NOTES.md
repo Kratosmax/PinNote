@@ -1,9 +1,12 @@
-## PinNote 0.4.1
+## PinNote 0.5.0
 
-- 新增 Full Setup、Lite Setup、Full Portable ZIP、Lite Portable ZIP 四种分发格式。
-- Full 自带 .NET 8 Desktop Runtime；Lite 体积更小，需要系统已安装 .NET 8 Desktop Runtime x64。
-- 新增 Full 自包含更新通道，并继续保留 `0.4.0` 使用的 Lite 通道。
-- Full 与 Lite 更新包会验证各自的通道标记，拒绝跨通道替换。
-- Setup 采用当前用户安装，无需管理员权限；便签数据继续保存在 `%LOCALAPPDATA%\PinNote`。
+- 修复 Windows 11 毛玻璃被高不透明灰层遮挡的问题：完整启用 DWM 全客户区背景，并检查原生返回码，失败时自动回退。
+- 移除便签窗口的重复圆角裁剪，改善顶部黑边、圆角锯齿和非整数 DPI 下的边缘表现。
+- 新增 GitHub URL 前缀线路和 HTTP 网络代理；支持 0 到 10 优先级、稳定故障转移、禁用直连和使用未保存配置检查更新。
+- 所有更新线路继续执行相同的 RSA 清单验签、SHA-256、版本、通道和包结构校验；失败线路的临时下载会被清理。
+- 设置页面改为统一的双标签布局，并新增网络线路管理列表。
+- 应用 Logo 改为更轻盈的淡蓝与淡绿色方案。
+
+Windows 11 22621 及以上使用系统 DWM 背景材质；Windows 10、较早的 Windows 11 或原生调用失败时使用清晰的不透明回退。GitHub URL 前缀线路会把完整 GitHub 下载 URL 暴露给所配置的第三方服务；HTTP 线路不提供传输保密，建议优先使用 HTTPS 前缀。
 
 当前安装包尚未使用 Windows Authenticode 代码签名，Windows 可能显示未知发布者提示。自动更新包仍使用 RSA 签名清单和 SHA-256 校验。
