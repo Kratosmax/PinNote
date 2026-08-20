@@ -6,6 +6,10 @@ public sealed class AppSettings
 
     public bool EnableMaterial { get; set; } = true;
 
+    public bool AutoUpdateEnabled { get; set; } = true;
+
+    public string SkippedUpdateVersion { get; set; } = string.Empty;
+
     public bool NewNoteHotkeyEnabled { get; set; } = true;
 
     public string NewNoteHotkey { get; set; } = "Ctrl+Shift+N";
@@ -18,6 +22,8 @@ public sealed class AppSettings
     {
         StartWithWindows = StartWithWindows,
         EnableMaterial = EnableMaterial,
+        AutoUpdateEnabled = AutoUpdateEnabled,
+        SkippedUpdateVersion = SkippedUpdateVersion,
         NewNoteHotkeyEnabled = NewNoteHotkeyEnabled,
         NewNoteHotkey = NewNoteHotkey,
         ManagerHotkeyEnabled = ManagerHotkeyEnabled,
@@ -29,6 +35,8 @@ public sealed class AppSettings
         ArgumentNullException.ThrowIfNull(source);
         StartWithWindows = source.StartWithWindows;
         EnableMaterial = source.EnableMaterial;
+        AutoUpdateEnabled = source.AutoUpdateEnabled;
+        SkippedUpdateVersion = source.SkippedUpdateVersion;
         NewNoteHotkeyEnabled = source.NewNoteHotkeyEnabled;
         NewNoteHotkey = source.NewNoteHotkey;
         ManagerHotkeyEnabled = source.ManagerHotkeyEnabled;
@@ -39,5 +47,6 @@ public sealed class AppSettings
     {
         NewNoteHotkey = string.IsNullOrWhiteSpace(NewNoteHotkey) ? "Ctrl+Shift+N" : NewNoteHotkey.Trim();
         ManagerHotkey = string.IsNullOrWhiteSpace(ManagerHotkey) ? "Ctrl+Shift+B" : ManagerHotkey.Trim();
+        SkippedUpdateVersion = SkippedUpdateVersion?.Trim() ?? string.Empty;
     }
 }

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>PinNote.Updater</RootNamespace>
+    <AssemblyName>PinNote.Updater</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PinNote.Core\PinNote.Core.csproj" />
+  </ItemGroup>
+</Project>

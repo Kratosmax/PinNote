@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Windows;
@@ -6,6 +7,7 @@ using System.Windows.Interop;
 using PinNote.Core.Models;
 using PinNote.Core.Reminders;
 using PinNote.Core.Storage;
+using PinNote.Core.Updates;
 using PinNote.Services;
 using PinNote.Windows;
 using Forms = System.Windows.Forms;
@@ -24,13 +26,17 @@ public sealed partial class App : System.Windows.Application
     private SaveCoordinator? _saveCoordinator;
     private ReminderScheduler? _reminderScheduler;
     private GlobalHotkeyService? _globalHotkeyService;
+    private UpdateClient? _updateClient;
+    private System.Threading.Timer? _updateTimer;
+    private readonly SemaphoreSlim _updateGate = new(1, 1);
+    private UpdateWindow? _updateWindow;
     private bool _isExiting;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, ResolveMutexName(), out var createdNew);
         if (!createdNew)
         {
             Infrastructure.NativeMethods.BroadcastShowExisting();
@@ -73,6 +79,7 @@ public sealed partial class App : System.Windows.Application
         _saveCoordinator = new SaveCoordinator(store, () => _snapshot.Clone());
         _saveCoordinator.SaveFailed += OnSaveFailed;
         _reminderScheduler = new ReminderScheduler(() => Dispatcher.BeginInvoke(ProcessDueReminders));
+        _updateClient = new UpdateClient();
 
         CreateTrayIcon();
         _globalHotkeyService = new GlobalHotkeyService(OnNewNoteHotkey, OnManagerHotkey);
@@ -106,6 +113,11 @@ public sealed partial class App : System.Windows.Application
 
         _reminderScheduler.Refresh(_snapshot.Notes);
         _ = Dispatcher.BeginInvoke(ResumeTriggeredReminders);
+        ConfigureUpdateTimer();
+        if (e.Args.Contains("--updated-from", StringComparer.OrdinalIgnoreCase))
+        {
+            _trayIcon?.ShowBalloonTip(4000, "PinNote 已更新", $"当前版本 {UpdateClient.CurrentVersion.ToString(3)}", Forms.ToolTipIcon.Info);
+        }
         ScheduleUiTestCapture();
     }
 
@@ -116,6 +128,17 @@ public sealed partial class App : System.Windows.Application
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PinNote")
             : Path.GetFullPath(overrideDirectory);
         return Path.Combine(directory, "notes.json");
+    }
+
+    private static string ResolveMutexName()
+    {
+        var instanceId = Environment.GetEnvironmentVariable("PINNOTE_INSTANCE_ID");
+        if (string.IsNullOrWhiteSpace(instanceId))
+        {
+            return MutexName;
+        }
+        var suffix = new string(instanceId.Where(char.IsLetterOrDigit).Take(32).ToArray());
+        return suffix.Length == 0 ? MutexName : $"{MutexName}.{suffix}";
     }
 
     private void CreateTrayIcon()
@@ -323,7 +346,11 @@ public sealed partial class App : System.Windows.Application
 
     private void ShowSettings()
     {
-        var window = new SettingsWindow(_snapshot.Settings, TryApplySettings)
+        var window = new SettingsWindow(
+            _snapshot.Settings,
+            TryApplySettings,
+            () => CheckForUpdatesAsync(manual: true),
+            UpdateClient.CurrentVersion)
         {
             Owner = _noteWindows.Values.FirstOrDefault(note => note.IsVisible)
         };
@@ -355,7 +382,107 @@ public sealed partial class App : System.Windows.Application
             window.RefreshMaterial();
         }
         MarkDirty();
+        ConfigureUpdateTimer();
         return null;
+    }
+
+    private void ConfigureUpdateTimer()
+    {
+        _updateTimer?.Dispose();
+        _updateTimer = null;
+        if (!_snapshot.Settings.AutoUpdateEnabled || _isExiting)
+        {
+            return;
+        }
+
+        _updateTimer = new System.Threading.Timer(
+            _ => _ = CheckForUpdatesAsync(manual: false),
+            null,
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromHours(24));
+    }
+
+    private async Task<string> CheckForUpdatesAsync(bool manual)
+    {
+        if (_updateClient is null)
+        {
+            return "更新服务尚未初始化。";
+        }
+        if (!await _updateGate.WaitAsync(0))
+        {
+            return "正在检查更新，请稍候。";
+        }
+
+        try
+        {
+            var update = await _updateClient.CheckAsync();
+            if (update is null)
+            {
+                return $"已是最新版本 {UpdateClient.CurrentVersion.ToString(3)}。";
+            }
+            if (!manual && update.Version.ToString(3) == _snapshot.Settings.SkippedUpdateVersion)
+            {
+                return "此版本已跳过。";
+            }
+
+            await Dispatcher.InvokeAsync(() => ShowUpdateWindow(update));
+            return $"发现新版本 {update.Version.ToString(3)}。";
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return "当前尚未发布可用的更新包。";
+        }
+        catch (Exception exception) when (!manual)
+        {
+            WriteDiagnostic(exception);
+            return "后台更新检查失败。";
+        }
+        finally
+        {
+            _updateGate.Release();
+        }
+    }
+
+    private void ShowUpdateWindow(UpdateInfo update)
+    {
+        if (_updateWindow is { IsVisible: true })
+        {
+            Infrastructure.NativeMethods.TryActivate(_updateWindow);
+            return;
+        }
+
+        _updateWindow = new UpdateWindow(
+            update,
+            _snapshot.Settings.EnableMaterial,
+            _updateClient?.CanInstallInPlace == true,
+            progress => InstallUpdateAsync(update, progress),
+            () =>
+            {
+                _snapshot.Settings.SkippedUpdateVersion = update.Version.ToString(3);
+                MarkDirty();
+            })
+        {
+            Owner = _managerWindow?.IsVisible == true
+                ? _managerWindow
+                : _noteWindows.Values.FirstOrDefault(window => window.IsVisible)
+        };
+        _updateWindow.Closed += (_, _) => _updateWindow = null;
+        _updateWindow.Show();
+    }
+
+    private async Task InstallUpdateAsync(UpdateInfo update, IProgress<int> progress)
+    {
+        if (_updateClient is null)
+        {
+            throw new InvalidOperationException("更新服务尚未初始化。");
+        }
+        if (_saveCoordinator is not null)
+        {
+            await _saveCoordinator.FlushAsync();
+        }
+        var prepared = await _updateClient.DownloadAsync(update, progress);
+        UpdateClient.LaunchUpdater(prepared);
+        await ExitApplicationAsync();
     }
 
     private void ProcessDueReminders()
@@ -547,11 +674,34 @@ public sealed partial class App : System.Windows.Application
         VisualCaptureService.Capture(reminder, Path.Combine(directory, "strong-reminder.png"));
         reminder.CloseWithoutAction();
 
-        var settings = new SettingsWindow(_snapshot.Settings, _ => null);
+        var settings = new SettingsWindow(
+            _snapshot.Settings,
+            _ => null,
+            () => Task.FromResult("视觉测试"),
+            UpdateClient.CurrentVersion);
         settings.Show();
         await Task.Delay(120);
         VisualCaptureService.Capture(settings, Path.Combine(directory, "settings.png"));
         settings.Close();
+
+        var visualUpdate = new UpdateInfo(
+            new Version(0, 4, 1),
+            UpdateTrust.Channel,
+            new Uri("https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-portable-win-x64.zip"),
+            8_400_000,
+            new string('A', 64),
+            "新增安全自动更新，并优化提醒窗口在高 DPI 下的稳定性。\n\n下载后会验证签名、哈希与包内版本。",
+            string.Empty);
+        var updateWindow = new UpdateWindow(
+            visualUpdate,
+            _snapshot.Settings.EnableMaterial,
+            canInstall: false,
+            _ => Task.CompletedTask,
+            () => { });
+        updateWindow.Show();
+        await Task.Delay(120);
+        VisualCaptureService.Capture(updateWindow, Path.Combine(directory, "update-available.png"));
+        updateWindow.Close();
 
         var visualGroup = new NoteGroup { Name = "发布计划", SortOrder = 0 };
         _snapshot.Groups.Add(visualGroup);
@@ -595,7 +745,9 @@ public sealed partial class App : System.Windows.Application
         }
     }
 
-    private async void ExitApplication()
+    private async void ExitApplication() => await ExitApplicationAsync();
+
+    private async Task ExitApplicationAsync()
     {
         if (_isExiting)
         {
@@ -626,6 +778,8 @@ public sealed partial class App : System.Windows.Application
 
         _trayIcon?.Dispose();
         _reminderScheduler?.Dispose();
+        _updateTimer?.Dispose();
+        _updateClient?.Dispose();
         _globalHotkeyService?.Dispose();
         _saveCoordinator?.Dispose();
         _singleInstanceMutex?.ReleaseMutex();

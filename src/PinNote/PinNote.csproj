@@ -8,7 +8,6 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RootNamespace>PinNote</RootNamespace>
     <AssemblyName>PinNote</AssemblyName>
-    <Version>0.3.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\..\temp\assets\pinnote.ico</ApplicationIcon>
   </PropertyGroup>

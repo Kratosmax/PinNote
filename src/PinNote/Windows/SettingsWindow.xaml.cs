@@ -10,18 +10,44 @@ public sealed partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
     private readonly Func<AppSettings, string?> _apply;
+    private readonly Func<Task<string>> _checkForUpdates;
 
-    public SettingsWindow(AppSettings settings, Func<AppSettings, string?> apply)
+    public SettingsWindow(
+        AppSettings settings,
+        Func<AppSettings, string?> apply,
+        Func<Task<string>> checkForUpdates,
+        Version currentVersion)
     {
         InitializeComponent();
         _settings = settings;
         _apply = apply;
+        _checkForUpdates = checkForUpdates;
         StartWithWindowsBox.IsChecked = settings.StartWithWindows;
         MaterialBox.IsChecked = settings.EnableMaterial;
+        AutoUpdateBox.IsChecked = settings.AutoUpdateEnabled;
+        CurrentVersionText.Text = $"当前版本 {currentVersion.ToString(3)}";
         NewNoteHotkeyEnabledBox.IsChecked = settings.NewNoteHotkeyEnabled;
         NewNoteHotkeyBox.Text = settings.NewNoteHotkey;
         ManagerHotkeyEnabledBox.IsChecked = settings.ManagerHotkeyEnabled;
         ManagerHotkeyBox.Text = settings.ManagerHotkey;
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdateButton.IsEnabled = false;
+        UpdateStatusText.Text = "正在检查…";
+        try
+        {
+            UpdateStatusText.Text = await _checkForUpdates();
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText.Text = $"检查失败：{exception.Message}";
+        }
+        finally
+        {
+            CheckUpdateButton.IsEnabled = true;
+        }
     }
 
     private void HotkeyBox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -53,6 +79,7 @@ public sealed partial class SettingsWindow : Window
         var candidate = _settings.Clone();
         candidate.StartWithWindows = StartWithWindowsBox.IsChecked == true;
         candidate.EnableMaterial = MaterialBox.IsChecked == true;
+        candidate.AutoUpdateEnabled = AutoUpdateBox.IsChecked == true;
         candidate.NewNoteHotkeyEnabled = NewNoteHotkeyEnabledBox.IsChecked == true;
         candidate.NewNoteHotkey = NewNoteHotkeyBox.Text;
         candidate.ManagerHotkeyEnabled = ManagerHotkeyEnabledBox.IsChecked == true;

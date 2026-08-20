@@ -1,6 +1,11 @@
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using PinNote.Core.Models;
 using PinNote.Core.Reminders;
 using PinNote.Core.Storage;
+using PinNote.Core.Updates;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -8,7 +13,11 @@ var tests = new (string Name, Func<Task> Run)[]
     ("reminder transitions preserve overdue state", TestTransitions),
     ("snapshot clone is independent", TestClone),
     ("schema normalization preserves groups and note state", TestSchema),
-    ("json store round-trips and creates backup", TestStore)
+    ("json store round-trips and creates backup", TestStore),
+    ("signed update manifest rejects tampering", TestUpdateManifest),
+    ("bounded copy handles non-seekable streams", TestBoundedStream),
+    ("real update package validates and installs", TestUpdatePackage),
+    ("failed update restores existing files", TestUpdateRollback)
 };
 
 var failures = new List<string>();
@@ -71,10 +80,14 @@ static Task TestClone()
     clone.Settings.EnableMaterial = false;
     clone.Settings.NewNoteHotkey = "Ctrl+Alt+N";
     clone.Settings.ManagerHotkeyEnabled = false;
+    clone.Settings.AutoUpdateEnabled = false;
+    clone.Settings.SkippedUpdateVersion = "0.4.0";
     Assert(snapshot.Notes[0].Title == "Original", "Cloned notes must be independent.");
     Assert(snapshot.Settings.EnableMaterial, "Cloned settings must be independent.");
     Assert(snapshot.Settings.NewNoteHotkey == "Ctrl+Shift+N" && snapshot.Settings.ManagerHotkeyEnabled,
         "Cloned shortcut settings must be independent.");
+    Assert(snapshot.Settings.AutoUpdateEnabled && snapshot.Settings.SkippedUpdateVersion.Length == 0,
+        "Cloned update settings must be independent.");
     clone.Groups[0].Name = "Changed group";
     Assert(snapshot.Groups[0].Name == "Work", "Cloned groups must be independent.");
     Assert(clone.Notes[0].IsHidden && clone.Notes[0].GroupId == clone.Groups[0].Id, "Clone must preserve note management state.");
@@ -111,7 +124,182 @@ static Task TestSchema()
     Assert(snapshot.Settings.NewNoteHotkey == "Ctrl+Shift+N" && snapshot.Settings.ManagerHotkey == "Ctrl+Shift+B",
         "Missing shortcut values should normalize to defaults.");
     Assert(!snapshot.Settings.NewNoteHotkeyEnabled, "Shortcut enabled state should survive normalization.");
+    Assert(snapshot.Settings.AutoUpdateEnabled, "Legacy settings should enable automatic update checks by default.");
     return Task.CompletedTask;
+}
+
+static Task TestUpdateManifest()
+{
+    using var rsa = RSA.Create(2048);
+    var unsigned = new UpdateManifest
+    {
+        Version = "0.4.1",
+        Channel = UpdateTrust.Channel,
+        DownloadUrl = "https://github.com/Kratosmax/PinNote/releases/download/v0.4.1/PinNote-0.4.1-portable-win-x64.zip",
+        Size = 12345,
+        Sha256 = new string('A', 64),
+        ReleaseNotes = "安全更新"
+    };
+    var signature = UpdateManifestCodec.Sign(unsigned, rsa.ExportPkcs8PrivateKeyPem());
+    var signed = new UpdateManifest
+    {
+        Version = unsigned.Version,
+        Channel = unsigned.Channel,
+        DownloadUrl = unsigned.DownloadUrl,
+        Size = unsigned.Size,
+        Sha256 = unsigned.Sha256,
+        Signature = signature,
+        ReleaseNotes = unsigned.ReleaseNotes
+    };
+    var json = UpdateManifestCodec.Serialize(signed);
+    var parsed = UpdateManifestCodec.ParseAndVerify(json, rsa.ExportSubjectPublicKeyInfoPem(), UpdateTrust.Channel);
+    Assert(parsed.Version == new Version(0, 4, 1), "A valid signed manifest should parse.");
+
+    var tampered = json.Replace("12345", "12346", StringComparison.Ordinal);
+    AssertThrows<CryptographicException>(
+        () => UpdateManifestCodec.ParseAndVerify(tampered, rsa.ExportSubjectPublicKeyInfoPem(), UpdateTrust.Channel),
+        "Changing signed fields must invalidate the signature.");
+    return Task.CompletedTask;
+}
+
+static async Task TestBoundedStream()
+{
+    var bytes = Encoding.UTF8.GetBytes(new string('x', 128));
+    await using var source = new NonSeekableReadStream(bytes);
+    await using var destination = new MemoryStream();
+    Assert(!source.CanSeek, "The regression source must remain non-seekable.");
+    await AssertThrowsAsync<InvalidDataException>(
+        () => BoundedStream.CopyToAsync(source, destination, 64),
+        "Copying beyond the configured limit must fail.");
+}
+
+static async Task TestUpdatePackage()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var version = new Version(0, 4, 0);
+        var packagePath = await CreatePackageAsync(root, version);
+        var update = await CreateUpdateInfoAsync(packagePath, version);
+        var validated = await UpdatePackageValidator.ValidateAsync(packagePath, update);
+        Assert(validated.Metadata.Version == "0.4.0", "Package metadata should match the signed version.");
+
+        var target = Path.Combine(root, "install");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "PinNote.exe"), "old");
+        await WriteMetadataAsync(Path.Combine(target, "pinnote-install.json"), version);
+        await UpdateInstaller.InstallAsync(packagePath, target, update);
+        Assert(await File.ReadAllTextAsync(Path.Combine(target, "PinNote.exe")) == "new", "The candidate executable should replace the old file.");
+        Assert(File.Exists(Path.Combine(target, "PinNote.dll")), "The candidate assembly should be installed.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task TestUpdateRollback()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var version = new Version(0, 4, 0);
+        var packagePath = await CreatePackageAsync(root, version, includeLockedFile: true);
+        var update = await CreateUpdateInfoAsync(packagePath, version);
+        var target = Path.Combine(root, "install");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "PinNote.exe"), "old");
+        await File.WriteAllTextAsync(Path.Combine(target, "locked.txt"), "locked-old");
+        await WriteMetadataAsync(Path.Combine(target, "pinnote-install.json"), version);
+
+        await using var locked = new FileStream(Path.Combine(target, "locked.txt"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        await AssertThrowsAsync<IOException>(
+            () => UpdateInstaller.InstallAsync(packagePath, target, update),
+            "A replacement failure should abort the transaction.");
+        Assert(await File.ReadAllTextAsync(Path.Combine(target, "PinNote.exe")) == "old", "Rollback must restore the previous executable.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static string CreateTestDirectory()
+{
+    var baseDirectory = Environment.GetEnvironmentVariable("PINNOTE_TEST_TEMP")
+        ?? throw new InvalidOperationException("PINNOTE_TEST_TEMP must point to the project temp directory.");
+    var directory = Path.Combine(baseDirectory, Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    return directory;
+}
+
+static async Task<string> CreatePackageAsync(string root, Version version, bool includeLockedFile = false)
+{
+    var content = Path.Combine(root, "content-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(content);
+    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.exe"), "new");
+    File.Copy(typeof(UpdateTrust).Assembly.Location, Path.Combine(content, "PinNote.dll"));
+    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.exe"), "updater");
+    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.dll"), "updater");
+    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.deps.json"), "{}");
+    await File.WriteAllTextAsync(Path.Combine(content, "PinNote.Updater.runtimeconfig.json"), "{}");
+    await WriteMetadataAsync(Path.Combine(content, "pinnote-install.json"), version);
+    await WriteMetadataAsync(Path.Combine(content, "pinnote-package.json"), version);
+    if (includeLockedFile)
+    {
+        await File.WriteAllTextAsync(Path.Combine(content, "locked.txt"), "locked-new");
+    }
+    var packagePath = Path.Combine(root, $"package-{Guid.NewGuid():N}.zip");
+    ZipFile.CreateFromDirectory(content, packagePath, CompressionLevel.NoCompression, includeBaseDirectory: false);
+    Directory.Delete(content, recursive: true);
+    return packagePath;
+}
+
+static Task WriteMetadataAsync(string path, Version version) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(new PinNotePackageMetadata
+{
+    Version = version.ToString(3),
+    Channel = UpdateTrust.Channel
+}));
+
+static async Task<UpdateInfo> CreateUpdateInfoAsync(string packagePath, Version version)
+{
+    var file = new FileInfo(packagePath);
+    await using var stream = file.OpenRead();
+    var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream));
+    return new UpdateInfo(
+        version,
+        UpdateTrust.Channel,
+        new Uri($"https://github.com/Kratosmax/PinNote/releases/download/v{version.ToString(3)}/package.zip"),
+        file.Length,
+        hash,
+        string.Empty,
+        string.Empty);
+}
+
+static void AssertThrows<TException>(Action action, string message) where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+    throw new InvalidOperationException(message);
+}
+
+static async Task AssertThrowsAsync<TException>(Func<Task> action, string message) where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+    throw new InvalidOperationException(message);
 }
 
 static async Task TestStore()
@@ -169,5 +357,27 @@ static void Assert(bool condition, string message)
     if (!condition)
     {
         throw new InvalidOperationException(message);
+    }
+}
+
+file sealed class NonSeekableReadStream(byte[] content) : Stream
+{
+    private readonly MemoryStream _inner = new(content, writable: false);
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() => throw new NotSupportedException();
+    public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        _inner.ReadAsync(buffer, cancellationToken);
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inner.Dispose();
+        base.Dispose(disposing);
     }
 }

@@ -2,7 +2,7 @@
 
 PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。它使用 WPF 和 .NET 8 构建，支持桌面便签、全局置顶、分级提醒、统一管理和全局快捷键，数据默认只保存在本机。
 
-当前版本：`0.3.0`
+当前版本：`0.4.0`
 
 ## 功能概览
 
@@ -16,6 +16,7 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 - 可自定义全局快捷键，也可以分别关闭。
 - Windows 11 系统背景材质；Windows 10 自动使用可读的兼容效果。
 - 空闲时没有键盘轮询；全局快捷键使用系统 `RegisterHotKey`。
+- 签名自动更新：低频后台检查、手动检查、跳过版本和失败回滚。
 
 ## 使用教程
 
@@ -30,6 +31,28 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 ```
 
 同目录下的 `notes.json.bak` 是最近一次备份。升级或替换程序文件不会主动删除此目录。
+
+### 自动更新
+
+正式便携包会在启动 15 秒后检查一次更新，此后每 24 小时检查一次；系统定时器等待期间不会轮询或持续占用 CPU。可以在托盘菜单的“设置”中关闭自动检查，或随时点击“检查更新”。
+
+发现新版本后可以立即更新、稍后处理或跳过当前版本。立即更新会依次执行：
+
+1. 下载签名清单并验证内置 RSA 公钥。
+2. 下载 ZIP，限制最大 200 MB 和连续无数据时间。
+3. 验证 SHA-256、文件数量、解压大小、路径、产品通道和包内程序集版本。
+4. 保存便签，启动外部更新器，退出主程序。
+5. 暂存替换程序文件；失败时恢复已替换文件，成功后重新启动 PinNote。
+
+更新缓存和最多两个轮转日志位于：
+
+```text
+%LOCALAPPDATA%\PinNote\updates
+%LOCALAPPDATA%\PinNote\update.log
+%LOCALAPPDATA%\PinNote\update.log.old
+```
+
+从源码目录直接运行、缺少 `pinnote-install.json` 或更新器文件时不会就地覆盖，只提供 Release 下载入口。
 
 ### 编辑和摆放便签
 
@@ -104,7 +127,7 @@ $env:PINNOTE_TEST_TEMP = "$PWD/temp/tests"
 dotnet run --project tests/PinNote.SmokeTests/PinNote.SmokeTests.csproj --configuration Release --no-build
 ```
 
-测试覆盖提醒状态机、数据克隆、旧数据归一化、分组和隐藏状态、窗口几何信息、快捷键设置及 JSON 原子保存/备份恢复。
+测试覆盖提醒状态机、数据克隆、旧数据归一化、分组和隐藏状态、窗口几何信息、快捷键设置、JSON 原子保存/备份恢复，以及清单签名、防篡改、不可 Seek 流、真实 ZIP 校验、安装和回滚。
 
 ### 本地运行
 
@@ -133,14 +156,48 @@ dotnet publish src/PinNote/PinNote.csproj `
 
 如果目标电脑没有安装 .NET 8 Desktop Runtime，可以将 `--self-contained false` 改为 `--self-contained true`，代价是包体积明显增大。
 
+### 生成签名候选包
+
+发布脚本会构建项目、运行测试、生成轻量便携 ZIP、包内元数据、SHA-256 文件和签名 `update.json`。私钥必须放在被 Git 忽略的 `temp` 目录或其他受控位置：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Build-Release.ps1 `
+  -PrivateKeyPath .\temp\signing\pinnote-update-private.pem
+```
+
+产物目录：
+
+```text
+temp/release/v0.4.0/
+```
+
+独立复核真实 ZIP 和签名清单：
+
+```powershell
+dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
+  --configuration Release --no-build -- verify `
+  --manifest temp/release/v0.4.0/update.json `
+  --package temp/release/v0.4.0/PinNote-0.4.0-portable-win-x64.zip
+```
+
+### GitHub 发布流程
+
+`.github/workflows/release.yml` 在推送 `v*.*.*` 标签时运行，并强制标签与 `Directory.Build.props` 的版本一致。仓库必须预先配置 Actions Secret `PINNOTE_UPDATE_SIGNING_KEY`，内容为与源码公钥匹配的 PEM 私钥。工作流只授予 `contents: write`，使用临时文件完成签名并在 `finally` 删除私钥。
+
+发布属于独立授权动作。确认候选包、版本和发布说明后，再创建并推送标签；不要覆盖已公开的同版本资产。
+
 ## 项目结构
 
 ```text
 src/PinNote/                 WPF 界面、窗口生命周期和 Windows 平台能力
 src/PinNote.Core/            数据模型、提醒状态机和 JSON 存储
+src/PinNote.Updater/         等待主程序退出、复核签名、替换、回滚和重启
 tests/PinNote.SmokeTests/    无第三方测试框架的核心冒烟测试
+tools/PinNote.ReleaseTool/   包元数据、签名清单生成与独立验证
+scripts/Build-Release.ps1    本地与 CI 共用的候选包构建脚本
 temp/                        构建、发布和 UI 验证产物（默认不提交）
-Directory.Build.props        统一编译规则与 temp 输出路径
+Directory.Build.props        唯一版本来源、统一编译规则与 temp 输出路径
 ```
 
 关键入口：
@@ -148,6 +205,8 @@ Directory.Build.props        统一编译规则与 temp 输出路径
 - `src/PinNote/App.xaml.cs`：单实例、托盘、窗口、保存和提醒编排。
 - `src/PinNote/Services/GlobalHotkeyService.cs`：系统级快捷键注册。
 - `src/PinNote.Core/Storage/JsonNoteStore.cs`：原子写入和备份恢复。
+- `src/PinNote.Core/Updates/`：清单验签、包校验和事务式安装。
+- `src/PinNote/Services/UpdateClient.cs`：联网检查、受限下载和更新器交接。
 - `src/PinNote/Windows/NoteWindow.xaml`：便签界面。
 - `src/PinNote/Windows/ManagerWindow.xaml`：统一管理页面。
 
@@ -159,7 +218,7 @@ Directory.Build.props        统一编译规则与 temp 输出路径
 这是一个 Windows 10/11 的 .NET 8 WPF 便签工具。
 请先阅读 README.md、Directory.Build.props、src/PinNote/App.xaml.cs、
 src/PinNote.Core/Storage/JsonNoteStore.cs 和现有测试，再提出最小改动方案。
-保持低 CPU、低内存、单实例、原子保存、旧 JSON 兼容和 Win10 回退。
+保持低 CPU、低内存、单实例、原子保存、旧 JSON 兼容、Win10 回退和更新签名兼容。
 所有构建与验证产物放在项目 temp 目录；修改后运行 Release 构建、冒烟测试，
 涉及 UI 时还要启动隔离实例并留下真实渲染证据。
 不要提交用户 notes.json、日志、截图缓存、bin/obj 或密钥。
@@ -174,6 +233,8 @@ src/PinNote.Core/Storage/JsonNoteStore.cs 和现有测试，再提出最小改�
 5. **隔离测试数据**：运行 GUI 测试时设置 `PINNOTE_DATA_DIR` 到 `temp` 子目录。
 6. **手术式修改**：不要把功能改动扩大成无关重构或引入大型依赖。
 7. **提交前验证**：至少完成 Release 构建、冒烟测试、敏感文件检查和 `git diff` 审阅。
+8. **保护更新信任链**：不得替换内置公钥而不安排安全迁移；私钥只能进入 GitHub Secret 或本机 `temp`，不得写入源码、日志和 Release。
+9. **保持通道一致**：当前仅支持 `portable-framework-dependent`，清单、ZIP 元数据和已安装标记必须一致。
 
 ### AI 交付清单
 
@@ -192,5 +253,6 @@ git diff --check
 
 - 仅支持 Windows 10 / Windows 11。
 - 当前没有账号、云同步或多人协作。
-- 自动更新仅预留接口，尚未启用联网更新。
-- 当前仓库不包含安装器和代码签名流程。
+- 自动更新仅支持官方轻量便携包，不支持源码构建目录或自包含包跨通道更新。
+- 当前没有安装器和 Windows Authenticode 代码签名；更新真实性由 RSA 清单签名与 SHA-256 保证。
+- `0.4.0` 是自动更新协议的首个版本，没有更早正式客户端可用于上一版本升级回归。
