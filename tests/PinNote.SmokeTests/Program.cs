@@ -20,6 +20,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("signed update manifest rejects tampering", TestUpdateManifest),
     ("update channels reject cross-channel manifests", TestUpdateChannels),
     ("bounded copy handles non-seekable streams", TestBoundedStream),
+    ("download staging releases and cleans temporary files", TestUpdatePackageStaging),
     ("real update package validates and installs", TestUpdatePackage),
     ("full update package accepts single-file updater", TestFullUpdatePackage),
     ("failed update restores existing files", TestUpdateRollback)
@@ -295,6 +296,41 @@ static async Task TestUpdatePackage()
         await UpdateInstaller.InstallAsync(packagePath, target, update);
         Assert(await File.ReadAllTextAsync(Path.Combine(target, "PinNote.exe")) == "new", "The candidate executable should replace the old file.");
         Assert(File.Exists(Path.Combine(target, "PinNote.dll")), "The candidate assembly should be installed.");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task TestUpdatePackageStaging()
+{
+    var root = CreateTestDirectory();
+    try
+    {
+        var version = CurrentTestVersion();
+        var sourcePackage = await CreatePackageAsync(root, version);
+        var update = await CreateUpdateInfoAsync(sourcePackage, version);
+        var temporaryPath = Path.Combine(root, "package.zip.download");
+        var packagePath = Path.Combine(root, "package.zip");
+        var progress = new Progress<int>();
+
+        await using (var incomplete = new MemoryStream(new byte[32]))
+        {
+            await AssertThrowsAsync<EndOfStreamException>(
+                () => UpdatePackageStager.StageAsync(incomplete, temporaryPath, packagePath, update, progress),
+                "An incomplete route should fail staging.");
+        }
+        Assert(!File.Exists(temporaryPath), "A failed route must not leave a locked temporary file.");
+
+        await using (var source = File.OpenRead(sourcePackage))
+        {
+            await UpdatePackageStager.StageAsync(source, temporaryPath, packagePath, update, progress);
+        }
+
+        Assert(File.Exists(packagePath), "A verified download should be atomically renamed to package.zip.");
+        Assert(!File.Exists(temporaryPath), "A successful download should not leave package.zip.download.");
+        await UpdatePackageValidator.ValidateAsync(packagePath, update);
     }
     finally
     {

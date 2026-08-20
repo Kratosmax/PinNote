@@ -156,17 +156,13 @@ internal sealed class UpdateClient
                 }
 
                 await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                await using var destination = new FileStream(
+                await UpdatePackageStager.StageAsync(
+                    source,
                     temporaryPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    64 * 1024,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
-                await CopyDownloadAsync(source, destination, update.Size, progress, cancellationToken).ConfigureAwait(false);
-                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
-                await UpdatePackageValidator.ValidateAsync(temporaryPath, update, cancellationToken).ConfigureAwait(false);
-                File.Move(temporaryPath, packagePath, overwrite: true);
+                    packagePath,
+                    update,
+                    progress,
+                    cancellationToken).ConfigureAwait(false);
                 downloaded = true;
                 break;
             }
@@ -230,38 +226,6 @@ internal sealed class UpdateClient
         startInfo.ArgumentList.Add("--pid");
         startInfo.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         _ = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动 PinNote 更新器。");
-    }
-
-    private static async Task CopyDownloadAsync(
-        Stream source,
-        Stream destination,
-        long expectedSize,
-        IProgress<int> progress,
-        CancellationToken cancellationToken)
-    {
-        var buffer = new byte[64 * 1024];
-        long total = 0;
-        while (true)
-        {
-            using var idleTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            idleTimeout.CancelAfter(TimeSpan.FromSeconds(30));
-            var read = await source.ReadAsync(buffer, idleTimeout.Token).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-            total += read;
-            if (total > expectedSize || total > UpdateManifestCodec.MaximumPackageSize)
-            {
-                throw new InvalidDataException("下载内容超过签名清单声明的大小。");
-            }
-            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            progress.Report((int)Math.Min(99, total * 100 / expectedSize));
-        }
-        if (total != expectedSize)
-        {
-            throw new EndOfStreamException("更新包下载不完整。");
-        }
     }
 
     private static HttpClient CreateClient(UpdateNetworkSettings settings)

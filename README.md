@@ -2,7 +2,9 @@
 
 PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。它使用 WPF 和 .NET 8 构建，支持桌面便签、全局置顶、分级提醒、统一管理和全局快捷键，数据默认只保存在本机。
 
-当前版本：`0.6.0`
+当前版本：`0.6.1`
+
+> **0.6.0 升级提示：** `0.6.0` 的自动更新会在启动新版更新器之前被临时 ZIP 文件锁阻断，因此无法自动安装 `0.6.1`。请从 [最新 Release](https://github.com/Kratosmax/PinNote/releases/latest) 手动下载并安装一次 `0.6.1`；便签和设置保存在 `%LOCALAPPDATA%\PinNote`，不会因覆盖安装或替换便携包而删除。升级后，后续自动更新恢复正常。
 
 ## 下载选择
 
@@ -56,6 +58,8 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 3. 验证 SHA-256、文件数量、解压大小、路径、产品通道和包内程序集版本。
 4. 保存便签，启动外部更新器，退出主程序。
 5. 暂存替换程序文件；失败时恢复已替换文件，成功后重新启动 PinNote。
+
+`0.6.1` 修复了下载完成后临时 ZIP 仍被写入流占用、导致校验阶段报“文件正由另一进程使用”的问题。下载写入现在会先关闭文件句柄，再执行校验和原子改名；失败线路也会清理临时文件后再重试。由于错误发生在 `0.6.0` 启动新版更新器之前，`0.6.0` 必须手动安装一次 `0.6.1`。
 
 更新缓存和最多两个轮转日志位于：
 
@@ -182,7 +186,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 产物目录：
 
 ```text
-temp/release/v0.5.0/
+temp/release/v0.6.1/
 ```
 
 独立复核真实 ZIP 和签名清单：
@@ -191,14 +195,14 @@ temp/release/v0.5.0/
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-framework-dependent `
-  --manifest temp/release/v0.5.0/update.json `
-  --package temp/release/v0.5.0/PinNote-0.5.0-Lite-Portable.zip
+  --manifest temp/release/v0.6.1/update.json `
+  --package temp/release/v0.6.1/PinNote-0.6.1-Lite-Portable.zip
 
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-self-contained `
-  --manifest temp/release/v0.5.0/update-full.json `
-  --package temp/release/v0.5.0/PinNote-0.5.0-Full-Portable.zip
+  --manifest temp/release/v0.6.1/update-full.json `
+  --package temp/release/v0.6.1/PinNote-0.6.1-Full-Portable.zip
 ```
 
 ### GitHub 发布流程
