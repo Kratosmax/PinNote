@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+temp/*
+!temp/assets/
+temp/assets/*
+!temp/assets/pinnote.ico
+artifacts/

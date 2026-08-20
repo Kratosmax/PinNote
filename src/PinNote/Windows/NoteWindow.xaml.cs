@@ -1,0 +1,459 @@
+using System.IO;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using PinNote.Core.Models;
+using PinNote.Core.Reminders;
+using PinNote.Infrastructure;
+
+namespace PinNote.Windows;
+
+public sealed partial class NoteWindow : Window
+{
+    private static readonly System.Windows.Media.Brush DefaultBorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(203, 211, 214));
+    private static readonly System.Windows.Media.Brush OverdueBorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(213, 154, 58));
+    private readonly NoteDocument _note;
+    private readonly Func<bool> _materialEnabled;
+    private bool _initializing = true;
+    private bool _allowClose;
+
+    public NoteWindow(NoteDocument note, Func<bool> materialEnabled)
+    {
+        InitializeComponent();
+        _note = note;
+        _materialEnabled = materialEnabled;
+
+        ReminderHour.ItemsSource = Enumerable.Range(0, 24).Select(value => value.ToString("00")).ToArray();
+        ReminderMinute.ItemsSource = Enumerable.Range(0, 12).Select(value => (value * 5).ToString("00")).ToArray();
+        LoadFromModel();
+        _initializing = false;
+    }
+
+    public NoteDocument Note => _note;
+
+    public event Action<NoteWindow>? Changed;
+
+    public event Action<NoteWindow>? ReminderChanged;
+
+    public event Action<NoteWindow>? NewRequested;
+
+    public event Action<NoteWindow>? DeleteRequested;
+
+    public event Action<NoteWindow>? HideRequested;
+
+    private void LoadFromModel()
+    {
+        TitleBox.Text = _note.Title;
+        Left = _note.Left;
+        Top = _note.Top;
+        Width = _note.Width;
+        Height = _note.Height;
+        ApplyPinMode();
+
+        if (!string.IsNullOrWhiteSpace(_note.RtfContent))
+        {
+            try
+            {
+                var range = new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd);
+                byte[] bytes;
+                try
+                {
+                    bytes = Convert.FromBase64String(_note.RtfContent);
+                }
+                catch (FormatException)
+                {
+                    bytes = Encoding.UTF8.GetBytes(_note.RtfContent);
+                }
+                using var stream = new MemoryStream(bytes);
+                range.Load(stream, DataFormats.Rtf);
+            }
+            catch (ArgumentException)
+            {
+                Editor.Document.Blocks.Clear();
+                Editor.Document.Blocks.Add(new Paragraph(new Run(_note.RtfContent)));
+            }
+        }
+
+        EnsureVisibleOnScreen();
+        PopulateReminderEditor();
+        RefreshReminderStatus();
+    }
+
+    private void EnsureVisibleOnScreen()
+    {
+        var area = SystemParameters.WorkArea;
+        Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width));
+        Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
+    }
+
+    private void PopulateReminderEditor()
+    {
+        var due = _note.ReminderAt?.LocalDateTime ?? RoundToFiveMinutes(DateTime.Now.AddHours(1));
+        ReminderDate.SelectedDate = due.Date;
+        ReminderHour.SelectedItem = due.Hour.ToString("00");
+        ReminderMinute.SelectedItem = (due.Minute / 5 * 5).ToString("00");
+        LevelWeak.IsChecked = _note.ReminderLevel == ReminderLevel.Weak;
+        LevelNormal.IsChecked = _note.ReminderLevel == ReminderLevel.Normal;
+        LevelStrong.IsChecked = _note.ReminderLevel == ReminderLevel.Strong;
+        LevelUltra.IsChecked = _note.ReminderLevel == ReminderLevel.Ultra;
+    }
+
+    public string GetPlainText()
+    {
+        var range = new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd);
+        return range.Text.Trim();
+    }
+
+    public void ShowFromTray(bool activate)
+    {
+        if (!IsVisible && !activate)
+        {
+            ShowActivated = false;
+            Show();
+            ShowActivated = true;
+        }
+        else
+        {
+            Show();
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        if (activate)
+        {
+            Activate();
+        }
+    }
+
+    public void RefreshMaterial() => NativeMethods.ApplyBackdrop(this, FrameBorder, _materialEnabled());
+
+    public void AllowCloseAndClose()
+    {
+        _allowClose = true;
+        Close();
+    }
+
+    public void CaptureGeometry()
+    {
+        if (WindowState != WindowState.Normal)
+        {
+            return;
+        }
+        _note.Left = Left;
+        _note.Top = Top;
+        _note.Width = ActualWidth > 0 ? ActualWidth : Width;
+        _note.Height = ActualHeight > 0 ? ActualHeight : Height;
+    }
+
+    public void ApplyReminderSignal(ReminderLevel level)
+    {
+        StopReminderSignal();
+        var color = level switch
+        {
+            ReminderLevel.Weak => System.Windows.Media.Color.FromRgb(213, 154, 58),
+            ReminderLevel.Normal => System.Windows.Media.Color.FromRgb(224, 126, 48),
+            ReminderLevel.Strong => System.Windows.Media.Color.FromRgb(201, 91, 82),
+            ReminderLevel.Ultra => System.Windows.Media.Color.FromRgb(218, 57, 57),
+            _ => System.Windows.Media.Color.FromRgb(213, 154, 58)
+        };
+        var brush = new SolidColorBrush(color);
+        FrameBorder.BorderBrush = brush;
+
+        var repeat = level == ReminderLevel.Ultra ? RepeatBehavior.Forever : new RepeatBehavior(level == ReminderLevel.Weak ? 3 : 5);
+        var colorAnimation = new ColorAnimation
+        {
+            From = color,
+            To = System.Windows.Media.Color.FromArgb(70, color.R, color.G, color.B),
+            Duration = TimeSpan.FromMilliseconds(level == ReminderLevel.Weak ? 550 : 280),
+            AutoReverse = true,
+            RepeatBehavior = repeat
+        };
+        brush.BeginAnimation(SolidColorBrush.ColorProperty, colorAnimation);
+
+        var thicknessAnimation = new ThicknessAnimation
+        {
+            From = new Thickness(1),
+            To = new Thickness(level == ReminderLevel.Weak ? 2 : 4),
+            Duration = colorAnimation.Duration,
+            AutoReverse = true,
+            RepeatBehavior = repeat
+        };
+        if (level != ReminderLevel.Ultra)
+        {
+            thicknessAnimation.Completed += (_, _) => SetStaticReminderVisual();
+        }
+
+        FrameBorder.BeginAnimation(Border.BorderThicknessProperty, thicknessAnimation);
+    }
+
+    public void StopReminderSignal()
+    {
+        FrameBorder.BeginAnimation(Border.BorderThicknessProperty, null);
+        if (FrameBorder.BorderBrush is SolidColorBrush brush)
+        {
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+        }
+        SetStaticReminderVisual();
+    }
+
+    public void RefreshReminderStatus()
+    {
+        if (_note.ReminderAt is not { } due)
+        {
+            ReminderStatus.Text = "未设置提醒";
+            SetStaticReminderVisual();
+            return;
+        }
+
+        var level = LevelLabel(_note.ReminderLevel);
+        if (_note.IsOverdue(DateTimeOffset.Now))
+        {
+            ReminderStatus.Text = $"已逾期 · {due.LocalDateTime:MM-dd HH:mm} · {level}";
+        }
+        else
+        {
+            ReminderStatus.Text = $"{due.LocalDateTime:MM-dd HH:mm} · {level}";
+        }
+        SetStaticReminderVisual();
+    }
+
+    public void SetSaveError(bool hasError) => SaveStatus.Text = hasError ? "保存失败" : string.Empty;
+
+    internal void ConfigureVisualTest(string title, string body, bool showReminderEditor)
+    {
+        TitleBox.Text = title;
+        Editor.Document.Blocks.Clear();
+        Editor.Document.Blocks.Add(new Paragraph(new Run(body)));
+        ReminderPanel.Visibility = showReminderEditor ? Visibility.Visible : Visibility.Collapsed;
+        if (showReminderEditor)
+        {
+            PopulateReminderEditor();
+        }
+    }
+
+    private void SetStaticReminderVisual()
+    {
+        FrameBorder.BorderThickness = new Thickness(_note.IsOverdue(DateTimeOffset.Now) ? 2 : 1);
+        FrameBorder.BorderBrush = _note.IsOverdue(DateTimeOffset.Now) ? OverdueBorderBrush : DefaultBorderBrush;
+    }
+
+    private void ApplyPinMode()
+    {
+        Topmost = _note.PinMode == PinMode.AlwaysOnTop;
+        PinButton.Foreground = _note.PinMode == PinMode.AlwaysOnTop
+            ? (System.Windows.Media.Brush)FindResource("PrimaryBrush")
+            : (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
+        PinButton.ToolTip = _note.PinMode == PinMode.AlwaysOnTop ? "已全局置顶，点击切换到桌面模式" : "桌面模式，点击全局置顶";
+    }
+
+    private void Window_SourceInitialized(object? sender, EventArgs e)
+    {
+        RefreshMaterial();
+        NativeMethods.InstallMessageHook(
+            this,
+            () => ((App)Application.Current).ShowManager(),
+            () => ((App)Application.Current).RefreshRemindersForSystemChange());
+    }
+
+    private void Window_Loaded(object sender, RoutedEventArgs e) => RefreshReminderStatus();
+
+    private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_allowClose)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        Hide();
+    }
+
+    private void Window_GeometryChanged(object? sender, EventArgs e)
+    {
+        if (_initializing || WindowState != WindowState.Normal)
+        {
+            return;
+        }
+
+        _note.Left = Left;
+        _note.Top = Top;
+        _note.Width = ActualWidth;
+        _note.Height = ActualHeight;
+        Changed?.Invoke(this);
+    }
+
+    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState == MouseButtonState.Pressed && e.OriginalSource is not TextBox)
+        {
+            DragMove();
+        }
+    }
+
+    private void DragGrip_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            DragMove();
+        }
+    }
+
+    private void NewNote_Click(object sender, RoutedEventArgs e) => NewRequested?.Invoke(this);
+
+    private void HideNote_Click(object sender, RoutedEventArgs e) => HideRequested?.Invoke(this);
+
+    private void PinButton_Click(object sender, RoutedEventArgs e)
+    {
+        _note.PinMode = _note.PinMode == PinMode.Desktop ? PinMode.AlwaysOnTop : PinMode.Desktop;
+        ApplyPinMode();
+        Changed?.Invoke(this);
+    }
+
+    private void ToggleReminderPanel_Click(object sender, RoutedEventArgs e)
+    {
+        ReminderPanel.Visibility = ReminderPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        if (ReminderPanel.Visibility == Visibility.Visible)
+        {
+            PopulateReminderEditor();
+        }
+    }
+
+    private void SetReminder_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReminderDate.SelectedDate is not { } date ||
+            ReminderHour.SelectedItem is not string hourText ||
+            ReminderMinute.SelectedItem is not string minuteText)
+        {
+            return;
+        }
+
+        var local = date.Date.AddHours(int.Parse(hourText)).AddMinutes(int.Parse(minuteText));
+        ReminderStateMachine.Schedule(_note, new DateTimeOffset(local), SelectedReminderLevel());
+        ReminderPanel.Visibility = Visibility.Collapsed;
+        RefreshReminderStatus();
+        ReminderChanged?.Invoke(this);
+    }
+
+    private void QuickReminder_Click(object sender, RoutedEventArgs e)
+    {
+        var now = DateTime.Now;
+        var due = (((FrameworkElement)sender).Tag as string) switch
+        {
+            "hour" => RoundToFiveMinutes(now.AddHours(1)),
+            "today" when now.TimeOfDay < TimeSpan.FromHours(18) => now.Date.AddHours(18),
+            "today" => now.Date.AddDays(1).AddHours(18),
+            "tomorrow" => now.Date.AddDays(1).AddHours(9),
+            _ => RoundToFiveMinutes(now.AddHours(1))
+        };
+        ReminderDate.SelectedDate = due.Date;
+        ReminderHour.SelectedItem = due.Hour.ToString("00");
+        ReminderMinute.SelectedItem = (due.Minute / 5 * 5).ToString("00");
+    }
+
+    private ReminderLevel SelectedReminderLevel()
+    {
+        if (LevelWeak.IsChecked == true) return ReminderLevel.Weak;
+        if (LevelStrong.IsChecked == true) return ReminderLevel.Strong;
+        if (LevelUltra.IsChecked == true) return ReminderLevel.Ultra;
+        return ReminderLevel.Normal;
+    }
+
+    private void ClearReminder_Click(object sender, RoutedEventArgs e)
+    {
+        ReminderStateMachine.Complete(_note);
+        ReminderPanel.Visibility = Visibility.Collapsed;
+        StopReminderSignal();
+        RefreshReminderStatus();
+        ReminderChanged?.Invoke(this);
+    }
+
+    private void DeleteNote_Click(object sender, RoutedEventArgs e)
+    {
+        var result = MessageBox.Show(this, "删除后无法恢复。确定删除这张便签吗？", "删除便签", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result == MessageBoxResult.Yes)
+        {
+            DeleteRequested?.Invoke(this);
+        }
+    }
+
+    private void TitleBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_initializing)
+        {
+            return;
+        }
+
+        _note.Title = TitleBox.Text;
+        Changed?.Invoke(this);
+    }
+
+    private void Editor_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_initializing)
+        {
+            return;
+        }
+
+        var range = new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd);
+        using var stream = new MemoryStream();
+        range.Save(stream, DataFormats.Rtf);
+        _note.RtfContent = Convert.ToBase64String(stream.ToArray());
+        Changed?.Invoke(this);
+    }
+
+    private void Editor_SelectionChanged(object sender, RoutedEventArgs e)
+    {
+        BoldButton.IsChecked = HasSelectionValue(TextElement.FontWeightProperty, FontWeights.Bold);
+        ItalicButton.IsChecked = HasSelectionValue(TextElement.FontStyleProperty, FontStyles.Italic);
+        UnderlineButton.IsChecked = Editor.Selection.GetPropertyValue(Inline.TextDecorationsProperty) != DependencyProperty.UnsetValue;
+    }
+
+    private bool HasSelectionValue(DependencyProperty property, object expected)
+    {
+        var value = Editor.Selection.GetPropertyValue(property);
+        return value != DependencyProperty.UnsetValue && Equals(value, expected);
+    }
+
+    private void Bold_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleBold.Execute(null, Editor);
+
+    private void Italic_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleItalic.Execute(null, Editor);
+
+    private void Underline_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleUnderline.Execute(null, Editor);
+
+    private void Bullets_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleBullets.Execute(null, Editor);
+
+    private void InkDark_Click(object sender, RoutedEventArgs e) => ApplyInk(System.Windows.Media.Color.FromRgb(32, 36, 40));
+
+    private void InkTeal_Click(object sender, RoutedEventArgs e) => ApplyInk(System.Windows.Media.Color.FromRgb(20, 125, 118));
+
+    private void InkCoral_Click(object sender, RoutedEventArgs e) => ApplyInk(System.Windows.Media.Color.FromRgb(201, 91, 82));
+
+    private void ApplyInk(System.Windows.Media.Color color)
+    {
+        Editor.Selection.ApplyPropertyValue(TextElement.ForegroundProperty, new SolidColorBrush(color));
+        Editor.Focus();
+    }
+
+    private static string LevelLabel(ReminderLevel level) => level switch
+    {
+        ReminderLevel.Weak => "弱提醒",
+        ReminderLevel.Normal => "普通提醒",
+        ReminderLevel.Strong => "强提醒",
+        ReminderLevel.Ultra => "超强提醒",
+        _ => "提醒"
+    };
+
+    private static DateTime RoundToFiveMinutes(DateTime value)
+    {
+        var ticks = TimeSpan.FromMinutes(5).Ticks;
+        return new DateTime(((value.Ticks + ticks - 1) / ticks) * ticks, value.Kind);
+    }
+
+}
