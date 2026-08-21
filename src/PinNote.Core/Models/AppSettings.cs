@@ -22,6 +22,8 @@ public sealed class AppSettings
 
     public List<string> FavoriteTextColors { get; set; } = [];
 
+    public bool AutoCompleteParentTodo { get; set; }
+
     public AppSettings Clone() => new()
     {
         StartWithWindows = StartWithWindows,
@@ -33,7 +35,8 @@ public sealed class AppSettings
         ManagerHotkeyEnabled = ManagerHotkeyEnabled,
         ManagerHotkey = ManagerHotkey,
         UpdateNetwork = new UpdateNetworkSettings(UpdateNetwork.GithubProxies?.ToList(), UpdateNetwork.HttpProxy).Normalize(),
-        FavoriteTextColors = FavoriteTextColors?.ToList() ?? []
+        FavoriteTextColors = FavoriteTextColors?.ToList() ?? [],
+        AutoCompleteParentTodo = AutoCompleteParentTodo
     };
 
     public void CopyFrom(AppSettings source)
@@ -49,6 +52,7 @@ public sealed class AppSettings
         ManagerHotkey = source.ManagerHotkey;
         UpdateNetwork = new UpdateNetworkSettings(source.UpdateNetwork.GithubProxies?.ToList(), source.UpdateNetwork.HttpProxy).Normalize();
         FavoriteTextColors = source.FavoriteTextColors?.ToList() ?? [];
+        AutoCompleteParentTodo = source.AutoCompleteParentTodo;
     }
 
     public void Normalize()

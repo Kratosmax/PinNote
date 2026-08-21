@@ -6,7 +6,7 @@
         Width="360" Height="420" MinWidth="280" MinHeight="260"
         WindowStyle="None" ResizeMode="CanResizeWithGrip"
         AllowsTransparency="False" Background="Transparent"
-        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="ClearType"
         ShowInTaskbar="False"
         SourceInitialized="Window_SourceInitialized"
         Closing="Window_Closing"
@@ -18,6 +18,10 @@
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
+        <Style TargetType="Paragraph">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="LineHeight" Value="20" />
+        </Style>
         <Style x:Key="ReminderChipStyle" TargetType="Button">
             <Setter Property="Height" Value="30" /><Setter Property="Padding" Value="10,0" />
             <Setter Property="Margin" Value="0,0,6,0" /><Setter Property="Background" Value="#0E000000" />
@@ -87,14 +91,13 @@
                                   ToolTip="斜体" Click="Italic_Click" />
                     <ToggleButton x:Name="UnderlineButton" Style="{StaticResource ToolToggleStyle}" Content="U"
                                   ToolTip="下划线" Click="Underline_Click" />
-                    <ToggleButton Style="{StaticResource ToolToggleStyle}" Content="•" FontSize="20"
-                                  ToolTip="项目符号" Click="Bullets_Click" />
                     <Button Width="26" Height="26" Margin="6,2,2,2" Background="#202428" BorderBrush="#30202428"
                             ToolTip="深色文字" Click="InkDark_Click" />
                     <Button Width="26" Height="26" Margin="2" Background="#147D76" BorderBrush="#30147D76"
                             ToolTip="青色文字" Click="InkTeal_Click" />
                     <Button Width="26" Height="26" Margin="2" Background="#C95B52" BorderBrush="#30C95B52"
                             ToolTip="珊瑚色文字" Click="InkCoral_Click" />
+                    <ToggleButton x:Name="MarkdownButton" Width="42" Height="30" Margin="8,2,2,2" Style="{StaticResource ToolToggleStyle}" Content="MD" ToolTip="Markdown 编辑/预览" Click="Markdown_Click" />
                     <Button x:Name="TextColorMenuButton" Width="26" Height="26" Margin="4,2,2,2"
                             Background="Transparent" BorderBrush="#30000000" Content="&#xE790;"
                             FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14"
@@ -155,15 +158,16 @@
                             <ColumnDefinition Width="44" />
                         </Grid.ColumnDefinitions>
                         <DatePicker x:Name="ReminderDate" Grid.Column="0" Height="32" Background="White" BorderBrush="#CBD3D6"
+                                    CalendarStyle="{StaticResource LargeCalendarStyle}"
                                     SelectedDateChanged="TimeSelection_Changed" />
                         <ComboBox x:Name="ReminderHour" Grid.Column="1" Height="32" VerticalContentAlignment="Center"
-                                  SelectionChanged="TimeSelection_Changed" />
+                                  IsEditable="True" MaxDropDownHeight="260" SelectionChanged="TimeSelection_Changed" />
                         <TextBlock Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center" Text=":" />
                         <ComboBox x:Name="ReminderMinute" Grid.Column="3" Height="32" VerticalContentAlignment="Center"
-                                  SelectionChanged="TimeSelection_Changed" />
+                                  IsEditable="True" MaxDropDownHeight="260" SelectionChanged="TimeSelection_Changed" />
                         <TextBlock Grid.Column="4" HorizontalAlignment="Center" VerticalAlignment="Center" Text=":" />
                         <ComboBox x:Name="ReminderSecond" Grid.Column="5" Height="32" VerticalContentAlignment="Center"
-                                  SelectionChanged="TimeSelection_Changed" />
+                                  IsEditable="True" MaxDropDownHeight="260" SelectionChanged="TimeSelection_Changed" />
                     </Grid>
                     </Border>
                     <UniformGrid Columns="2" Rows="2" Margin="-2,0,-2,8">

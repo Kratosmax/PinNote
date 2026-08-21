@@ -1,55 +1,100 @@
 <Window x:Class="PinNote.Windows.ManagerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PinNote 便签管理" Width="940" Height="620" MinWidth="760" MinHeight="480"
-        WindowStartupLocation="CenterScreen" Background="#F4F7F8" SourceInitialized="Window_SourceInitialized" Closing="Window_Closing">
+        Title="PinNote 管理" Width="1040" Height="680" MinWidth="840" MinHeight="520"
+        WindowStartupLocation="CenterScreen" Background="{StaticResource SurfaceBrush}"
+        SourceInitialized="Window_SourceInitialized" Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
-        <Style x:Key="QuietButtonStyle" TargetType="Button">
+        <Style x:Key="QuietButtonStyle" TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="12,0" />
+        </Style>
+        <Style x:Key="ModeToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="16,0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="#CBD3D6" />
-            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1" CornerRadius="4">
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="4">
                             <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="#10000000" /></Trigger>
-                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Root" Property="Background" Value="#1E000000" /></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#20147D76" />
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="CircularCheckStyle" TargetType="CheckBox">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid>
+                            <Ellipse x:Name="Ring" Fill="White" Stroke="{StaticResource BorderBrush}" StrokeThickness="1.5" />
+                            <Path x:Name="Check" Data="M 5 11 L 9 15 L 17 7" Stroke="White" StrokeThickness="2"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Ring" Property="Stroke" Value="{StaticResource PrimaryBrush}" /></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Ring" Property="Fill" Value="{StaticResource PrimaryBrush}" />
+                                <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource PrimaryBrush}" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Margin" Value="0,0,0,5" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
     </Window.Resources>
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="210" />
+            <ColumnDefinition Width="220" />
             <ColumnDefinition Width="1" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Grid Grid.Column="0" Background="#FAFCFC">
+        <Grid Grid.Column="0" Background="{StaticResource SurfaceRaisedBrush}">
             <Grid.RowDefinitions>
-                <RowDefinition Height="72" />
+                <RowDefinition Height="112" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
-            <StackPanel Margin="20,16,12,8">
+            <StackPanel Margin="18,14,12,8">
                 <TextBlock Text="PinNote" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock Text="便签管理" Margin="0,3,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                <Border Margin="0,10,0,0" Padding="2" Background="#10000000" CornerRadius="5" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton x:Name="NoteModeButton" Style="{StaticResource ModeToggleStyle}" IsChecked="True"
+                                      Content="便签" Click="NoteMode_Click" />
+                        <ToggleButton x:Name="TodoModeButton" Style="{StaticResource ModeToggleStyle}"
+                                      Content="待办" Click="TodoMode_Click" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
             <ListBox x:Name="GroupList" Grid.Row="1" Margin="10,0" BorderThickness="0" Background="Transparent"
                      SelectionChanged="GroupList_SelectionChanged">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
-                        <Setter Property="Height" Value="38" /><Setter Property="Padding" Value="10,0" />
+                        <Setter Property="Height" Value="38" />
+                        <Setter Property="Padding" Value="10,0" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         <Setter Property="VerticalContentAlignment" Value="Center" />
                     </Style>
@@ -57,7 +102,7 @@
             </ListBox>
             <Grid Grid.Row="2" Margin="10,8,10,14">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
-                <Button Grid.Column="0" Style="{StaticResource QuietButtonStyle}" Content="+ 新建分组" Click="AddGroup_Click" />
+                <Button x:Name="AddGroupButton" Grid.Column="0" Style="{StaticResource QuietButtonStyle}" Content="+ 新建分组" Click="AddGroup_Click" />
                 <Button Grid.Column="1" Margin="6,0,0,0" Style="{StaticResource QuietButtonStyle}" Padding="0" Content="&#xE70F;"
                         FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" ToolTip="重命名分组" Click="RenameGroup_Click" />
                 <Button Grid.Column="2" Margin="6,0,0,0" Style="{StaticResource QuietButtonStyle}" Padding="0" Content="&#xE74D;"
@@ -70,69 +115,175 @@
         <Grid Grid.Column="2" Margin="22,18,22,20">
             <Grid.RowDefinitions>
                 <RowDefinition Height="46" />
-                <RowDefinition Height="44" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="34" />
             </Grid.RowDefinitions>
             <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="310" /><ColumnDefinition Width="112" /></Grid.ColumnDefinitions>
-                <TextBlock x:Name="PageTitle" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" Text="全部便签" />
-                <Border Grid.Column="1" Height="34" Margin="0,0,10,0" Background="White" BorderBrush="#CBD3D6" BorderThickness="1" CornerRadius="4">
-                    <Grid><TextBlock Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#7C858A" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
-                        <TextBox x:Name="SearchBox" Margin="34,0,8,0" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"
-                                 TextChanged="SearchBox_TextChanged" ToolTip="搜索标题或正文" /></Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="300" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="118" /></Grid.ColumnDefinitions>
+                <TextBlock x:Name="PageTitle" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" />
+                <Border Grid.Column="1" Height="34" Margin="0,0,10,0" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                    <Grid>
+                        <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#7C858A" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                        <TextBox x:Name="SearchBox" Margin="34,0,8,0" BorderThickness="0" Background="Transparent"
+                                 VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged" ToolTip="搜索标题或正文" />
+                    </Grid>
                 </Border>
-                <Button Grid.Column="2" Style="{StaticResource CommandButtonStyle}" Content="+ 新建便签" Click="CreateNote_Click" />
+                <Button x:Name="TodoWindowButton" Grid.Column="2" Width="132" Margin="0,0,10,0"
+                        Visibility="Collapsed" Style="{StaticResource QuietButtonStyle}"
+                        Content="显示分组窗口" Click="ShowTodoWindow_Click" />
+                <Button x:Name="CreateItemButton" Grid.Column="3" Style="{StaticResource CommandButtonStyle}"
+                        Content="+ 新建便签" Click="CreateItem_Click" />
             </Grid>
 
-            <Grid Grid.Row="1" Margin="0,4,0,6">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="38" /><ColumnDefinition Width="*" /><ColumnDefinition Width="150" /><ColumnDefinition Width="150" /><ColumnDefinition Width="110" /></Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="1" Text="标题" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                <TextBlock Grid.Column="2" Text="分组" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                <TextBlock Grid.Column="3" Text="提醒" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
-                <TextBlock Grid.Column="4" Text="操作" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+            <Grid x:Name="NotePanel" Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="46" />
+                    <RowDefinition Height="38" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="30" />
+                </Grid.RowDefinitions>
+                <Grid Margin="0,5,0,5">
+
+                    <Grid x:Name="NoteBatchActions" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="70" /><ColumnDefinition Width="70" /><ColumnDefinition Width="70" /><ColumnDefinition Width="70" /><ColumnDefinition Width="70" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox x:Name="SelectAllNotesBox" VerticalAlignment="Center" Content=" 全选" Checked="SelectAllNotes_Changed" Unchecked="SelectAllNotes_Changed" />
+                        <TextBlock x:Name="NoteSelectionText" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Text="已选 0 项" />
+                        <ComboBox x:Name="BatchGroupCombo" Grid.Column="2" Height="32" Margin="0,0,8,0" VerticalContentAlignment="Center" DisplayMemberPath="Name" />
+                        <Button x:Name="BatchMoveButton" Grid.Column="3" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Content="移动" Click="BatchMoveNotes_Click" />
+                        <Button x:Name="BatchShowButton" Grid.Column="4" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Content="显示" Click="BatchShowNotes_Click" />
+                        <Button x:Name="BatchHideButton" Grid.Column="5" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Content="隐藏" Click="BatchHideNotes_Click" />
+                        <Button x:Name="BatchDeleteNotesButton" Grid.Column="6" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="删除" Click="BatchDeleteNotes_Click" />
+                        <Button Grid.Column="7" Style="{StaticResource QuietButtonStyle}" Content="取消" Click="ToggleNoteMultiSelect_Click" />
+                    </Grid>
+                    <Button x:Name="NoteMultiSelectButton" Width="72" HorizontalAlignment="Right" Style="{StaticResource QuietButtonStyle}" Content="多选" Click="ToggleNoteMultiSelect_Click" />
+                </Grid>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="108" /></Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="2" Text="标题" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <TextBlock Grid.Column="3" Text="分组" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <TextBlock Grid.Column="4" Text="提醒" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <TextBlock Grid.Column="5" Text="操作" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                </Grid>
+                <ListBox x:Name="NoteList" Grid.Row="2" BorderThickness="0" Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="NoteList_MouseDoubleClick"
+                         ItemContainerStyle="{StaticResource ListItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border MinWidth="650" Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="0,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="108" /></Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Visibility="{Binding DataContext.NoteSelectionVisibility, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" Click="NoteSelection_Click" />
+                                    <TextBlock Grid.Column="1" Text="{Binding VisibilityGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="{Binding VisibilityBrush}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                                        <TextBlock Text="{Binding Preview}" Margin="0,2,14,0" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <ComboBox Grid.Column="3" Width="128" Height="30" HorizontalAlignment="Left" VerticalContentAlignment="Center"
+                                              ItemsSource="{Binding DataContext.GroupChoices, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding Note.GroupId, Mode=TwoWay}"
+                                              DropDownClosed="RowGroup_DropDownClosed" />
+                                    <TextBlock Grid.Column="4" Text="{Binding ReminderText}" VerticalAlignment="Center" FontSize="12" Foreground="{Binding ReminderBrush}" />
+                                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="{Binding ToggleGlyph}" ToolTip="显示或隐藏" Click="ToggleVisibility_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" ToolTip="打开编辑" Click="OpenNote_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="删除" Click="DeleteNote_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock x:Name="NoteCountText" Grid.Row="3" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
             </Grid>
 
-            <ListBox x:Name="NoteList" Grid.Row="2" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     MouseDoubleClick="NoteList_MouseDoubleClick">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        <Setter Property="Margin" Value="0,0,0,5" />
-                        <Setter Property="Padding" Value="0" />
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="0,8">
-                            <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="38" /><ColumnDefinition Width="*" /><ColumnDefinition Width="150" /><ColumnDefinition Width="150" /><ColumnDefinition Width="110" /></Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{Binding VisibilityGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                           Foreground="{Binding VisibilityBrush}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Preview}" Margin="0,2,14,0" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                                <ComboBox Grid.Column="2" Width="132" Height="30" HorizontalAlignment="Left" VerticalContentAlignment="Center"
-                                          ItemsSource="{Binding DataContext.GroupChoices, RelativeSource={RelativeSource AncestorType=Window}}"
-                                          DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding Note.GroupId, Mode=TwoWay}"
-                                          DropDownClosed="RowGroup_DropDownClosed" />
-                                <TextBlock Grid.Column="3" Text="{Binding ReminderText}" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" />
-                                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Width="32" Height="30" Background="Transparent" BorderBrush="Transparent" Content="{Binding ToggleGlyph}"
-                                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" ToolTip="显示或隐藏" Click="ToggleVisibility_Click" />
-                                    <Button Width="32" Height="30" Background="Transparent" BorderBrush="Transparent" Content="&#xE70F;"
-                                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" ToolTip="打开编辑" Click="OpenNote_Click" />
-                                    <Button Width="32" Height="30" Background="Transparent" BorderBrush="Transparent" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;"
-                                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" ToolTip="删除" Click="DeleteNote_Click" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+            <Grid x:Name="TodoPanel" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="46" />
+                    <RowDefinition Height="38" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="30" />
+                </Grid.RowDefinitions>
+                <Grid Margin="0,5">
 
-            <TextBlock x:Name="CountText" Grid.Row="3" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <Grid x:Name="TodoBatchActions" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="100" /><ColumnDefinition Width="100" /><ColumnDefinition Width="76" /><ColumnDefinition Width="70" /></Grid.ColumnDefinitions>
+                        <CheckBox x:Name="SelectAllTodosBox" VerticalAlignment="Center" Content=" 全选" Checked="SelectAllTodos_Changed" Unchecked="SelectAllTodos_Changed" />
+                        <TextBlock x:Name="TodoSelectionText" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Text="已选 0 项" />
+                        <Button x:Name="BatchReminderButton" Grid.Column="2" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Content="统一提醒" Click="BatchReminderTodos_Click" />
+                        <Button x:Name="BatchClearReminderButton" Grid.Column="3" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Content="清除提醒" Click="BatchClearReminderTodos_Click" />
+                        <Button x:Name="BatchDeleteTodosButton" Grid.Column="4" Margin="0,0,6,0" Style="{StaticResource QuietButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="删除" Click="BatchDeleteTodos_Click" />
+                        <Button Grid.Column="5" Style="{StaticResource QuietButtonStyle}" Content="取消" Click="ToggleTodoMultiSelect_Click" />
+                    </Grid>
+                    <Button x:Name="TodoMultiSelectButton" Width="72" HorizontalAlignment="Right" Style="{StaticResource QuietButtonStyle}" Content="多选" Click="ToggleTodoMultiSelect_Click" />
+                </Grid>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="140" /></Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="1" Text="待办事项" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <TextBlock Grid.Column="2" Text="提醒" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                    <TextBlock Grid.Column="3" Text="操作" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+                </Grid>
+                <ListBox x:Name="TodoList" Grid.Row="2" BorderThickness="0" Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" ItemContainerStyle="{StaticResource ListItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border MinWidth="650" Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="0,9">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="140" /></Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Visibility="{Binding DataContext.TodoSelectionVisibility, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" Click="TodoSelection_Click" />
+                                    <Grid Grid.Column="1" Margin="{Binding Indent}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <CheckBox Grid.Column="0" Style="{StaticResource CircularCheckStyle}" VerticalAlignment="Center"
+                                                  IsChecked="{Binding IsCompleted, Mode=OneWay}" Click="TodoComplete_Click" ToolTip="标记完成" />
+                                        <Grid Grid.Column="1" Margin="2,0,12,0" VerticalAlignment="Center">
+                                            <TextBlock x:Name="TodoTitle" Text="{Binding Title}" Foreground="{Binding Foreground}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                                            <Border x:Name="StrikeLine" Height="1.5" Background="{StaticResource TextSecondaryBrush}"
+                                                    HorizontalAlignment="Stretch" VerticalAlignment="Center" RenderTransformOrigin="0,0.5">
+                                                <Border.RenderTransform><ScaleTransform ScaleX="0" /></Border.RenderTransform>
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <DataTrigger.EnterActions>
+                                                                    <BeginStoryboard>
+                                                                        <Storyboard>
+                                                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)"
+                                                                                             From="0" To="1" Duration="0:0:0.28">
+                                                                                <DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></DoubleAnimation.EasingFunction>
+                                                                            </DoubleAnimation>
+                                                                        </Storyboard>
+                                                                    </BeginStoryboard>
+                                                                </DataTrigger.EnterActions>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                            </Border>
+                                        </Grid>
+                                    </Grid>
+                                    <TextBlock Grid.Column="2" Text="{Binding ReminderText}" VerticalAlignment="Center" FontSize="12" Foreground="{Binding ReminderBrush}" />
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal">
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE710;" ToolTip="新增子待办" Click="AddChildTodo_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" ToolTip="重命名" Click="RenameTodo_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE823;" ToolTip="设置或清除提醒" Click="SetTodoReminder_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="删除及其子待办" Click="DeleteTodo_Click" />
+                                    </StackPanel>
+                                </Grid>
+
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock x:Name="TodoCountText" Grid.Row="3" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+            </Grid>
         </Grid>
     </Grid>
 </Window>

@@ -13,6 +13,7 @@ internal sealed record PreparedUpdate(string PackagePath, string ManifestPath, s
 
 internal sealed class UpdateClient
 {
+    private static readonly SemaphoreSlim DownloadGate = new(1, 1);
     private const string ManifestBaseUrl =
         "https://github.com/Kratosmax/PinNote/releases/latest/download/";
     private static readonly HashSet<string> AllowedRedirectHosts = new(StringComparer.OrdinalIgnoreCase)
@@ -118,6 +119,23 @@ internal sealed class UpdateClient
     {
         ArgumentNullException.ThrowIfNull(update);
         ArgumentNullException.ThrowIfNull(progress);
+        await DownloadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await DownloadCoreAsync(update, progress, networkSettings, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            DownloadGate.Release();
+        }
+    }
+
+    private async Task<PreparedUpdate> DownloadCoreAsync(
+        UpdateInfo update,
+        IProgress<int> progress,
+        UpdateNetworkSettings? networkSettings,
+        CancellationToken cancellationToken)
+    {
         if (!CanInstallInPlace)
         {
             throw new InvalidOperationException("当前运行目录不是 PinNote 正式便携包，不能执行就地更新。");

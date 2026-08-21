@@ -27,6 +27,7 @@ public sealed partial class SettingsWindow : Window
         _checkForUpdates = checkForUpdates;
         StartWithWindowsBox.IsChecked = settings.StartWithWindows;
         MaterialBox.IsChecked = settings.EnableMaterial;
+        AutoCompleteParentTodoBox.IsChecked = settings.AutoCompleteParentTodo;
         AutoUpdateBox.IsChecked = settings.AutoUpdateEnabled;
         CurrentVersionText.Text = $"当前版本 {currentVersion.ToString(3)}";
         NewNoteHotkeyEnabledBox.IsChecked = settings.NewNoteHotkeyEnabled;
@@ -128,6 +129,7 @@ public sealed partial class SettingsWindow : Window
         var candidate = _settings.Clone();
         candidate.StartWithWindows = StartWithWindowsBox.IsChecked == true;
         candidate.EnableMaterial = MaterialBox.IsChecked == true;
+        candidate.AutoCompleteParentTodo = AutoCompleteParentTodoBox.IsChecked == true;
         candidate.AutoUpdateEnabled = AutoUpdateBox.IsChecked == true;
         candidate.NewNoteHotkeyEnabled = NewNoteHotkeyEnabledBox.IsChecked == true;
         candidate.NewNoteHotkey = NewNoteHotkeyBox.Text;

@@ -9,19 +9,27 @@ namespace PinNote.Windows;
 
 public sealed partial class ReminderWindow : Window
 {
-    private readonly NoteDocument _note;
     private readonly ReminderLevel _level;
     private bool _handled;
 
     public ReminderWindow(NoteDocument note, string preview, bool materialEnabled)
+        : this(note.Title, preview, note.ReminderLevel, materialEnabled, "便签")
+    {
+    }
+
+    public ReminderWindow(string title, string preview, ReminderLevel level, bool materialEnabled, string itemType)
     {
         InitializeComponent();
-        _note = note;
-        _level = note.ReminderLevel;
+        _level = level;
         ShowActivated = _level == ReminderLevel.Ultra;
-        LevelText.Text = _level == ReminderLevel.Ultra ? "超强提醒 · 需要处理" : "强提醒 · 已置前";
-        TitleText.Text = string.IsNullOrWhiteSpace(note.Title) ? "便签提醒" : note.Title;
-        PreviewText.Text = string.IsNullOrWhiteSpace(preview) ? "这张便签设置了提醒。" : preview;
+        LevelText.Text = _level switch
+        {
+            ReminderLevel.Normal => "普通提醒 · 已到时间",
+            ReminderLevel.Ultra => "超强提醒 · 需要处理",
+            _ => "强提醒 · 已置前"
+        };
+        TitleText.Text = string.IsNullOrWhiteSpace(title) ? $"{itemType}提醒" : title;
+        PreviewText.Text = string.IsNullOrWhiteSpace(preview) ? $"这项{itemType}设置了提醒。" : preview;
         Tag = materialEnabled;
     }
 

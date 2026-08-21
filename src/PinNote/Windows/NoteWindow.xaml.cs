@@ -22,6 +22,9 @@ public sealed partial class NoteWindow : Window
     private bool _initializing = true;
     private bool _suppressSelectionAnimation;
     private bool _allowClose;
+    private bool _markdownPreview;
+    private bool _suppressEditorPersistence;
+    private string _markdownSource = string.Empty;
 
     public NoteWindow(NoteDocument note, Func<bool> materialEnabled, Func<IReadOnlyList<string>> favoriteTextColors)
     {
@@ -108,9 +111,9 @@ public sealed partial class NoteWindow : Window
         {
             var due = _note.ReminderAt?.LocalDateTime ?? TrimMilliseconds(DateTime.Now.AddHours(1));
             ReminderDate.SelectedDate = due.Date;
-            ReminderHour.SelectedItem = due.Hour.ToString("00");
-            ReminderMinute.SelectedItem = due.Minute.ToString("00");
-            ReminderSecond.SelectedItem = due.Second.ToString("00");
+            ReminderHour.Text = due.Hour.ToString("00");
+            ReminderMinute.Text = due.Minute.ToString("00");
+            ReminderSecond.Text = due.Second.ToString("00");
             LevelWeak.IsChecked = _note.ReminderLevel == ReminderLevel.Weak;
             LevelNormal.IsChecked = _note.ReminderLevel == ReminderLevel.Normal;
             LevelStrong.IsChecked = _note.ReminderLevel == ReminderLevel.Strong;
@@ -125,7 +128,7 @@ public sealed partial class NoteWindow : Window
     public string GetPlainText()
     {
         var range = new TextRange(Editor.Document.ContentStart, Editor.Document.ContentEnd);
-        return range.Text.Trim();
+        return range.Text.ReplaceLineEndings("\n").TrimEnd('\r', '\n');
     }
 
     public void ShowFromTray(bool activate)
@@ -351,17 +354,19 @@ public sealed partial class NoteWindow : Window
     private void SetReminder_Click(object sender, RoutedEventArgs e)
     {
         if (ReminderDate.SelectedDate is not { } date ||
-            ReminderHour.SelectedItem is not string hourText ||
-            ReminderMinute.SelectedItem is not string minuteText ||
-            ReminderSecond.SelectedItem is not string secondText)
+            !TryParseTimePart(ReminderHour.Text, 23, out var hour) ||
+            !TryParseTimePart(ReminderMinute.Text, 59, out var minute) ||
+            !TryParseTimePart(ReminderSecond.Text, 59, out var second))
         {
+            MessageBox.Show(this, "请输入有效的日期以及 00-23 时、00-59 分、00-59 秒。", "时间无效",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         var local = date.Date
-            .AddHours(int.Parse(hourText))
-            .AddMinutes(int.Parse(minuteText))
-            .AddSeconds(int.Parse(secondText));
+            .AddHours(hour)
+            .AddMinutes(minute)
+            .AddSeconds(second);
         ReminderStateMachine.Schedule(_note, new DateTimeOffset(local), SelectedReminderLevel());
         ReminderPanel.Visibility = Visibility.Collapsed;
         RefreshReminderStatus();
@@ -383,9 +388,9 @@ public sealed partial class NoteWindow : Window
         try
         {
             ReminderDate.SelectedDate = due.Date;
-            ReminderHour.SelectedItem = due.Hour.ToString("00");
-            ReminderMinute.SelectedItem = due.Minute.ToString("00");
-            ReminderSecond.SelectedItem = due.Second.ToString("00");
+            ReminderHour.Text = due.Hour.ToString("00");
+            ReminderMinute.Text = due.Minute.ToString("00");
+            ReminderSecond.Text = due.Second.ToString("00");
         }
         finally
         {
@@ -420,6 +425,68 @@ public sealed partial class NoteWindow : Window
         }
     }
 
+    internal void ConfigureMarkdownVisualTest()
+    {
+        Editor.Document.Blocks.Clear();
+        Editor.Document.Blocks.Add(new Paragraph(new Run("# 发布清单\n\n- **安装包**\n- 自动更新\n\n## 验证结果")));
+        ReminderPanel.Visibility = Visibility.Collapsed;
+        _markdownPreview = false;
+        Markdown_Click(MarkdownButton, new RoutedEventArgs());
+    }
+    private void Markdown_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_markdownPreview)
+        {
+            _markdownSource = GetPlainText();
+            _markdownPreview = true;
+            MarkdownButton.Content = "编辑";
+            MarkdownButton.ToolTip = "返回 Markdown 编辑模式";
+            _suppressEditorPersistence = true;
+            try { Editor.Document = RenderMarkdown(_markdownSource); Editor.IsReadOnly = true; }
+            finally { _suppressEditorPersistence = false; }
+        }
+        else
+        {
+            _markdownPreview = false;
+            MarkdownButton.Content = "MD";
+            MarkdownButton.ToolTip = "Markdown 编辑/预览";
+            _suppressEditorPersistence = true;
+            try { Editor.Document = new FlowDocument(new Paragraph(new Run(_markdownSource))); Editor.IsReadOnly = false; }
+            finally { _suppressEditorPersistence = false; }
+        }
+    }
+
+    private static FlowDocument RenderMarkdown(string markdown)
+    {
+        var document = new FlowDocument { PagePadding = new Thickness(4) };
+        foreach (var raw in markdown.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (line.StartsWith("# ", StringComparison.Ordinal)) document.Blocks.Add(new Paragraph(ParseInline(line[2..])) { FontSize = 22, FontWeight = FontWeights.Bold });
+            else if (line.StartsWith("## ", StringComparison.Ordinal)) document.Blocks.Add(new Paragraph(ParseInline(line[3..])) { FontSize = 19, FontWeight = FontWeights.SemiBold });
+            else if (line.StartsWith("### ", StringComparison.Ordinal)) document.Blocks.Add(new Paragraph(ParseInline(line[4..])) { FontSize = 17, FontWeight = FontWeights.SemiBold });
+            else if (line.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("* ", StringComparison.Ordinal)) document.Blocks.Add(new Paragraph(ParseInline("• " + line[2..])) { Margin = new Thickness(12, 2, 0, 2) });
+            else document.Blocks.Add(new Paragraph(ParseInline(line)));
+        }
+        return document;
+    }
+
+    private static Inline ParseInline(string text)
+    {
+        var span = new Span();
+        var index = 0;
+        while (index < text.Length)
+        {
+            var start = text.IndexOf("**", index, StringComparison.Ordinal);
+            if (start < 0) { span.Inlines.Add(new Run(text[index..])); break; }
+            if (start > index) span.Inlines.Add(new Run(text[index..start]));
+            var end = text.IndexOf("**", start + 2, StringComparison.Ordinal);
+            if (end < 0) { span.Inlines.Add(new Run(text[start..])); break; }
+            span.Inlines.Add(new Bold(new Run(text[(start + 2)..end])));
+            index = end + 2;
+        }
+        return span;
+    }
     private void TitleBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_initializing)
@@ -433,7 +500,7 @@ public sealed partial class NoteWindow : Window
 
     private void Editor_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_initializing)
+        if (_initializing || _suppressEditorPersistence)
         {
             return;
         }
@@ -449,9 +516,17 @@ public sealed partial class NoteWindow : Window
     {
         BoldButton.IsChecked = HasSelectionValue(TextElement.FontWeightProperty, FontWeights.Bold);
         ItalicButton.IsChecked = HasSelectionValue(TextElement.FontStyleProperty, FontStyles.Italic);
-        UnderlineButton.IsChecked = Editor.Selection.GetPropertyValue(Inline.TextDecorationsProperty) != DependencyProperty.UnsetValue;
+        UnderlineButton.IsChecked = HasUnderline();
     }
 
+    private bool HasUnderline()
+    {
+        if (Editor.Selection.GetPropertyValue(Inline.TextDecorationsProperty) is not TextDecorationCollection decorations)
+        {
+            return false;
+        }
+        return decorations.Any(decoration => decoration.Location == TextDecorationLocation.Underline);
+    }
     private bool HasSelectionValue(DependencyProperty property, object expected)
     {
         var value = Editor.Selection.GetPropertyValue(property);
@@ -463,8 +538,6 @@ public sealed partial class NoteWindow : Window
     private void Italic_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleItalic.Execute(null, Editor);
 
     private void Underline_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleUnderline.Execute(null, Editor);
-
-    private void Bullets_Click(object sender, RoutedEventArgs e) => EditingCommands.ToggleBullets.Execute(null, Editor);
 
     private void InkDark_Click(object sender, RoutedEventArgs e) => ApplyInk(System.Windows.Media.Color.FromRgb(32, 36, 40));
 
@@ -646,6 +719,9 @@ public sealed partial class NoteWindow : Window
 
     private static DateTime TrimMilliseconds(DateTime value) =>
         new(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
+
+    private static bool TryParseTimePart(string text, int maximum, out int value) =>
+        int.TryParse(text.Trim(), out value) && value >= 0 && value <= maximum;
 
     private sealed class Win32DialogOwner(nint handle) : System.Windows.Forms.IWin32Window
     {

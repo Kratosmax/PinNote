@@ -16,6 +16,7 @@ public static class UpdatePackageStager
         ArgumentNullException.ThrowIfNull(update);
         ArgumentNullException.ThrowIfNull(progress);
 
+        var ownsTemporaryFile = false;
         try
         {
             await using (var destination = new FileStream(
@@ -26,6 +27,7 @@ public static class UpdatePackageStager
                 64 * 1024,
                 FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
+                                                ownsTemporaryFile = true;
                 await CopyAsync(source, destination, update.Size, progress, cancellationToken).ConfigureAwait(false);
                 await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -35,7 +37,10 @@ public static class UpdatePackageStager
         }
         catch
         {
-            TryDelete(temporaryPath);
+            if (ownsTemporaryFile)
+            {
+                TryDelete(temporaryPath);
+            }
             throw;
         }
     }

@@ -16,7 +16,7 @@ internal sealed class ReminderScheduler : IDisposable
         _timer = new System.Threading.Timer(OnTimer, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
-    public void Refresh(IReadOnlyCollection<NoteDocument> notes)
+    public void Refresh(IReadOnlyCollection<NoteDocument> notes, IReadOnlyCollection<TodoItem> todoItems)
     {
         if (_disposed)
         {
@@ -24,13 +24,15 @@ internal sealed class ReminderScheduler : IDisposable
         }
 
         var now = DateTimeOffset.Now;
-        if (ReminderPlanner.GetDue(notes, now).Count > 0)
+        if (ReminderPlanner.GetDue(notes, now).Count > 0 || TodoPlanner.GetDue(todoItems, now).Count > 0)
         {
             _timer.Change(TimeSpan.Zero, Timeout.InfiniteTimeSpan);
             return;
         }
 
-        var next = ReminderPlanner.GetNextDue(notes, now);
+        var nextNote = ReminderPlanner.GetNextDue(notes, now);
+        var nextTodo = TodoPlanner.GetNextDue(todoItems, now);
+        var next = new[] { nextNote, nextTodo }.Where(value => value is not null).Min();
         var delay = next is null ? Timeout.InfiniteTimeSpan : next.Value - now;
         if (delay != Timeout.InfiniteTimeSpan)
         {

@@ -44,11 +44,12 @@ internal static class NativeMethods
             return new BackdropResult(false, null, null);
         }
 
+        var nativeCorners = TryApplyRoundedCorners(hwnd);
         if (!enabled || !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)
             || AppContext.TryGetSwitch("PinNote.DisableBackdrop", out var disabled) && disabled)
         {
             DisableSystemBackdrop(hwnd);
-            ApplyOpaqueFallback(window, surface);
+            ApplyOpaqueFallback(window, surface, nativeCorners);
             return new BackdropResult(false, null, null);
         }
 
@@ -57,8 +58,6 @@ internal static class NativeMethods
             source.CompositionTarget.BackgroundColor = Colors.Transparent;
         }
 
-        var rounded = 2;
-        _ = DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref rounded, sizeof(int));
         var backdrop = 3;
         var backdropResult = DwmSetWindowAttribute(hwnd, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
         var fullWindow = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
@@ -66,7 +65,7 @@ internal static class NativeMethods
         if (backdropResult != 0 || frameResult != 0)
         {
             DisableSystemBackdrop(hwnd);
-            ApplyOpaqueFallback(window, surface);
+            ApplyOpaqueFallback(window, surface, nativeCorners);
             return new BackdropResult(false, backdropResult, frameResult);
         }
 
@@ -83,17 +82,24 @@ internal static class NativeMethods
         return new BackdropResult(true, backdropResult, frameResult);
     }
 
-    private static void ApplyOpaqueFallback(Window window, Border surface)
+    private static void ApplyOpaqueFallback(Window window, Border surface, bool nativeCorners = false)
     {
         var fallback = Color.FromRgb(244, 247, 248);
         window.Background = new SolidColorBrush(fallback);
         surface.Background = new SolidColorBrush(fallback);
-        surface.CornerRadius = new CornerRadius(8);
-        surface.ClipToBounds = true;
+        surface.CornerRadius = nativeCorners ? new CornerRadius(0) : new CornerRadius(8);
+        surface.ClipToBounds = !nativeCorners;
         if (WindowChrome.GetWindowChrome(window) is { } chrome)
         {
-            chrome.CornerRadius = new CornerRadius(8);
+            chrome.CornerRadius = nativeCorners ? new CornerRadius(0) : new CornerRadius(8);
         }
+    }
+
+    private static bool TryApplyRoundedCorners(nint hwnd)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return false;
+        var rounded = 2;
+        return DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref rounded, sizeof(int)) == 0;
     }
 
     private static void DisableSystemBackdrop(nint hwnd)

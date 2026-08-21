@@ -53,9 +53,9 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Button x:Name="SkipButton" MinWidth="88" Height="34" Content="跳过此版本" Click="Skip_Click" />
+                <Button x:Name="SkipButton" MinWidth="88" Height="34" Style="{StaticResource SecondaryButtonStyle}" Content="跳过此版本" Click="Skip_Click" />
                 <Button x:Name="LaterButton" Grid.Column="2" MinWidth="76" Height="34" Margin="0,0,8,0"
-                        Content="稍后" Click="Later_Click" />
+                        Style="{StaticResource SecondaryButtonStyle}" Content="稍后" Click="Later_Click" />
                 <Button x:Name="InstallButton" Grid.Column="3" MinWidth="102" Height="34"
                         Style="{StaticResource CommandButtonStyle}" Content="立即更新" Click="Install_Click" />
             </Grid>

@@ -11,6 +11,8 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("planner selects due and next reminder", TestPlanner),
     ("reminder transitions preserve overdue state", TestTransitions),
+    ("todo hierarchy, reminders, and completion normalize safely", TestTodos),
+    ("todo drag reorder and reparent reject hierarchy cycles", TestTodoMove),
     ("snapshot clone is independent", TestClone),
     ("schema normalization preserves groups and note state", TestSchema),
     ("favorite text colors normalize and persist", TestFavoriteTextColors),
@@ -75,6 +77,102 @@ static Task TestTransitions()
     return Task.CompletedTask;
 }
 
+static Task TestTodos()
+{
+    var now = new DateTimeOffset(2026, 8, 21, 9, 30, 0, TimeSpan.FromHours(8));
+    var group = new TodoGroup
+    {
+        Name = "  发布  ",
+        Left = 245,
+        Top = 180,
+        Width = 520,
+        Height = 610,
+        PinMode = PinMode.AlwaysOnTop,
+        IsHidden = true
+    };
+    var parent = new TodoItem { GroupId = group.Id, Title = "父任务" };
+    var child = new TodoItem
+    {
+        GroupId = group.Id,
+        ParentId = parent.Id,
+        Title = "子任务",
+        ReminderAt = now.AddMinutes(-2),
+        ReminderLevel = ReminderLevel.Strong
+    };
+    var grandchild = new TodoItem { GroupId = group.Id, ParentId = child.Id, Title = "孙任务", ReminderAt = now.AddMinutes(10) };
+    var completed = new TodoItem
+    {
+        GroupId = group.Id,
+        Title = "已办",
+        ReminderAt = now.AddMinutes(-5),
+        IsCompleted = true
+    };
+    var snapshot = new NoteSnapshot
+    {
+        SchemaVersion = 2,
+        TodoGroups = [group],
+        TodoItems = [parent, child, grandchild, completed]
+    };
+    snapshot.Settings.AutoCompleteParentTodo = true;
+    snapshot.Normalize();
+
+    Assert(snapshot.SchemaVersion == 4 && group.Name == "发布", "Todo data should upgrade to schema 4 and normalize group names.");
+    Assert(group.Left == 245 && group.Top == 180 && group.Width == 520 && group.Height == 610 &&
+           group.PinMode == PinMode.AlwaysOnTop && group.IsHidden,
+        "Todo group window geometry, pin mode, and visibility should survive normalization.");
+    Assert(TodoPlanner.GetDue(snapshot.TodoItems, now).SequenceEqual([child]), "Only incomplete scheduled overdue todos should trigger.");
+    Assert(TodoPlanner.GetNextDue(snapshot.TodoItems, now) == grandchild.ReminderAt, "The nearest future todo reminder should be selected.");
+    TodoPlanner.Trigger(child, now);
+    Assert(child.ReminderState == ReminderState.Triggered && child.ReminderAt == now.AddMinutes(-2),
+        "Strong todo reminders should remain actionable and retain the original overdue time.");
+    TodoPlanner.Snooze(child, now.AddMinutes(5));
+    Assert(child.ReminderState == ReminderState.Scheduled && child.ReminderLevel == ReminderLevel.Strong,
+        "Snoozing a todo should preserve its reminder strength.");
+    TodoPlanner.SetCompleted(child, true, now);
+    Assert(child.IsCompleted && child.CompletedAt == now && !child.IsOverdue(now), "Completing a todo should retain completion evidence and clear overdue emphasis.");
+    Assert(TodoPlanner.Descendants(snapshot.TodoItems, parent.Id).Select(item => item.Id).ToHashSet()
+        .SetEquals([child.Id, grandchild.Id]), "Descendant traversal should include child and grandchild items.");
+
+    TodoPlanner.SetCompleted(grandchild, true, now);
+    var completedParents = TodoPlanner.CompleteEligibleAncestors(snapshot.TodoItems, grandchild, now, _ => true);
+    Assert(completedParents.Select(item => item.Id).SequenceEqual([parent.Id]),
+        "Completing the final descendant should make the eligible parent completable.");
+
+    var clone = snapshot.Clone();
+    clone.TodoGroups[0].Name = "Changed";
+    clone.TodoItems[0].Title = "Changed";
+    clone.Settings.AutoCompleteParentTodo = false;
+    Assert(snapshot.TodoGroups[0].Name == "发布" && snapshot.TodoItems[0].Title == "父任务" &&
+           snapshot.TodoGroups[0].PinMode == PinMode.AlwaysOnTop &&
+           snapshot.Settings.AutoCompleteParentTodo, "Todo groups, items, and settings must clone independently.");
+
+    var cycleA = new TodoItem { GroupId = group.Id };
+    var cycleB = new TodoItem { GroupId = group.Id, ParentId = cycleA.Id };
+    cycleA.ParentId = cycleB.Id;
+    snapshot.TodoItems = [cycleA, cycleB];
+    snapshot.Normalize();
+    Assert(snapshot.TodoItems.Any(item => item.ParentId is null), "Cyclic todo parents should be broken during normalization.");
+    return Task.CompletedTask;
+}
+static Task TestTodoMove()
+{
+    var group = new TodoGroup { Name = "拖放" };
+    var first = new TodoItem { GroupId = group.Id, Title = "第一项", SortOrder = 0 };
+    var second = new TodoItem { GroupId = group.Id, Title = "第二项", SortOrder = 1 };
+    var third = new TodoItem { GroupId = group.Id, Title = "第三项", SortOrder = 2 };
+    var child = new TodoItem { GroupId = group.Id, ParentId = first.Id, Title = "子项", SortOrder = 0 };
+    var items = new List<TodoItem> { first, second, third, child };
+
+    Assert(TodoPlanner.Move(items, third, first, makeChild: false), "A root todo should move before another root todo.");
+    Assert(third.ParentId is null && third.SortOrder == 0 && first.SortOrder == 1 && second.SortOrder == 2,
+        "Root siblings should be renumbered after a reorder.");
+    Assert(TodoPlanner.Move(items, second, first, makeChild: true), "A todo should become the target todo's last child.");
+    Assert(second.ParentId == first.Id && child.SortOrder == 0 && second.SortOrder == 1,
+        "Reparenting should preserve existing children and append the dragged todo.");
+    Assert(!TodoPlanner.Move(items, first, child, makeChild: true), "A parent cannot be moved under its descendant.");
+    Assert(first.ParentId is null, "A rejected cyclic move must not mutate the parent id.");
+    return Task.CompletedTask;
+}
 static Task TestClone()
 {
     var snapshot = new NoteSnapshot { Notes = [new NoteDocument { Title = "Original" }] };
@@ -122,7 +220,7 @@ static Task TestSchema()
     snapshot.Settings.NewNoteHotkeyEnabled = false;
     snapshot.Normalize();
 
-    Assert(snapshot.SchemaVersion == 2, "Old snapshots should normalize to the current schema.");
+    Assert(snapshot.SchemaVersion == 4, "Old snapshots should normalize to the current schema.");
     Assert(known.Name == "工作", "Group names should normalize.");
     Assert(orphan.GroupId is null, "Unknown group references should move to ungrouped.");
     Assert(orphan.IsHidden, "Hidden state must survive normalization.");
@@ -494,8 +592,26 @@ static async Task TestStore()
         };
         snapshot.Settings.NewNoteHotkey = "Ctrl+Alt+J";
         snapshot.Settings.ManagerHotkeyEnabled = false;
+        snapshot.Settings.AutoCompleteParentTodo = true;
         snapshot.Settings.RememberFavoriteTextColor("#6B5BD2");
         snapshot.Notes[0].GroupId = snapshot.Groups[0].Id;
+        snapshot.TodoGroups.Add(new TodoGroup
+        {
+            Name = "发布待办",
+            Left = 410,
+            Top = 220,
+            Width = 460,
+            Height = 540,
+            PinMode = PinMode.AlwaysOnTop,
+            IsHidden = true
+        });
+        snapshot.TodoItems.Add(new TodoItem
+        {
+            GroupId = snapshot.TodoGroups[0].Id,
+            Title = "验证安装包",
+            ReminderAt = new DateTimeOffset(2026, 8, 21, 10, 20, 30, TimeSpan.FromHours(8)),
+            ReminderLevel = ReminderLevel.Ultra
+        });
 
         await store.SaveAsync(snapshot);
         var loaded = await store.LoadAsync();
@@ -507,6 +623,15 @@ static async Task TestStore()
             "Shortcut settings should round-trip.");
         Assert(loaded.Settings.FavoriteTextColors.SequenceEqual(["#6B5BD2"]),
             "Favorite text colors should round-trip.");
+        Assert(loaded.TodoGroups.Count == 1 && loaded.TodoItems.Count == 1 &&
+               loaded.TodoItems[0].GroupId == loaded.TodoGroups[0].Id &&
+               loaded.TodoItems[0].ReminderAt?.Second == 30 &&
+               loaded.TodoItems[0].ReminderLevel == ReminderLevel.Ultra &&
+               loaded.TodoGroups[0].Left == 410 &&
+               loaded.TodoGroups[0].PinMode == PinMode.AlwaysOnTop &&
+               loaded.TodoGroups[0].IsHidden,
+            "Todo group window state, reminder strength, and second-precision reminders should round-trip.");
+        Assert(loaded.Settings.AutoCompleteParentTodo, "Todo parent completion behavior should round-trip.");
 
         loaded.Notes[0].Title = "Second save";
         await store.SaveAsync(loaded);
