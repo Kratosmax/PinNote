@@ -72,5 +72,5 @@ jobs:
             "$root/update-full.json" `
             "$root/SHA256SUMS.txt" `
             --title "PinNote $version" `
-            --notes-file RELEASE_NOTES.md `
+            --notes-file RELEASE_NOTES_CURRENT.md `
             --verify-tag
