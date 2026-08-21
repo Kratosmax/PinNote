@@ -164,7 +164,7 @@ public sealed partial class App : System.Windows.Application
         _trayMenu.Items.Add("显示全部", null, (_, _) => Dispatcher.Invoke(ShowAllNotes));
         _trayMenu.Items.Add("隐藏全部", null, (_, _) => Dispatcher.Invoke(HideAllNotes));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add("设置", null, (_, _) => Dispatcher.Invoke(ShowSettings));
+        _trayMenu.Items.Add("设置", null, (_, _) => Dispatcher.Invoke(() => { ShowManager(); _managerWindow?.ShowSettingsMode(); }));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("退出", null, async (_, _) => await Dispatcher.InvokeAsync(ExitApplication));
 
@@ -448,7 +448,8 @@ public sealed partial class App : System.Windows.Application
             (note, visible) => SetNoteVisibility(note, visible),
             DeleteNote,
             (group, visible) => SetTodoGroupVisibility(group, visible, activate: true),
-            OnManagerDataChanged);
+            OnManagerDataChanged,
+            () => new SettingsPanel(_snapshot.Settings, TryApplySettings, network => CheckForUpdatesAsync(manual: true, network), UpdateClient.CurrentVersion));
         _ = new WindowInteropHelper(_managerWindow).EnsureHandle();
         return _managerWindow;
     }
@@ -507,20 +508,6 @@ public sealed partial class App : System.Windows.Application
         SyncTodoGroupWindows();
         MarkDirty();
         _reminderScheduler?.Refresh(_snapshot.Notes, _snapshot.TodoItems);
-    }
-
-    private void ShowSettings()
-    {
-        var window = new SettingsWindow(
-            _snapshot.Settings,
-            TryApplySettings,
-            network => CheckForUpdatesAsync(manual: true, network),
-            UpdateClient.CurrentVersion)
-        {
-            Owner = (Window?)_noteWindows.Values.FirstOrDefault(note => note.IsVisible)
-                ?? _todoGroupWindows.Values.FirstOrDefault(todo => todo.IsVisible)
-        };
-        window.ShowDialog();
     }
 
     private string? TryApplySettings(AppSettings candidate)
@@ -999,19 +986,6 @@ public sealed partial class App : System.Windows.Application
         VisualCaptureService.Capture(reminder, Path.Combine(directory, "strong-reminder.png"));
         reminder.CloseWithoutAction();
 
-        var settings = new SettingsWindow(
-            _snapshot.Settings,
-            _ => null,
-            _ => Task.FromResult("视觉测试"),
-            UpdateClient.CurrentVersion);
-        settings.Show();
-        await Task.Delay(120);
-        VisualCaptureService.Capture(settings, Path.Combine(directory, "settings-general.png"));
-        settings.ShowNetworkSettingsForVisualQa();
-        await Task.Delay(120);
-        VisualCaptureService.Capture(settings, Path.Combine(directory, "settings.png"));
-        settings.Close();
-
         var visualUpdate = new UpdateInfo(
             new Version(0, 5, 0),
             UpdateTrust.Channel,
@@ -1088,6 +1062,10 @@ public sealed partial class App : System.Windows.Application
         manager.SelectTodosForVisualQa();
         await Task.Delay(320);
         VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-todos-multiselect.png"));
+
+        manager.ShowSettingsMode();
+        await Task.Delay(180);
+        VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-settings.png"));
 
         var todoWindow = _todoGroupWindows[todoGroup.Id];
         todoGroup.IsHidden = false;

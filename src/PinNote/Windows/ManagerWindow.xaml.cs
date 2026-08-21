@@ -23,6 +23,7 @@ public sealed partial class ManagerWindow : Window
     private readonly Action<NoteDocument> _deleteNote;
     private readonly Action<TodoGroup, bool> _setTodoGroupVisibility;
     private readonly Action _changed;
+    private readonly Func<SettingsPanel> _createSettingsPanel;
     private readonly ObservableCollection<NoteRow> _noteRows = [];
     private readonly ObservableCollection<TodoRow> _todoRows = [];
     private readonly ObservableCollection<GroupChoice> _groupChoices = [];
@@ -37,7 +38,7 @@ public sealed partial class ManagerWindow : Window
 
     public ManagerWindow(NoteSnapshot snapshot, Func<NoteDocument> createNote, Action<NoteDocument> openNote,
         Action<NoteDocument, bool> setVisibility, Action<NoteDocument> deleteNote,
-        Action<TodoGroup, bool> setTodoGroupVisibility, Action changed)
+        Action<TodoGroup, bool> setTodoGroupVisibility, Action changed, Func<SettingsPanel> createSettingsPanel)
     {
         InitializeComponent();
         _snapshot = snapshot;
@@ -47,6 +48,7 @@ public sealed partial class ManagerWindow : Window
         _deleteNote = deleteNote;
         _setTodoGroupVisibility = setTodoGroupVisibility;
         _changed = changed;
+        _createSettingsPanel = createSettingsPanel;
         DataContext = this;
         NoteList.ItemsSource = _noteRows;
         TodoList.ItemsSource = _todoRows;
@@ -96,6 +98,30 @@ public sealed partial class ManagerWindow : Window
         TryPromptForReminder("视觉测试：待办提醒", DateTimeOffset.Now.AddHours(1), ReminderLevel.Strong,
             true, out _, out _);
 
+    public void ShowSettingsMode() => SettingsMode_Click(this, new RoutedEventArgs());
+    private void SettingsMode_Click(object sender, RoutedEventArgs e)
+    {
+        _todoMode = false;
+        NoteModeButton.IsChecked = false; TodoModeButton.IsChecked = false; SettingsModeButton.IsChecked = true;
+        NotePanel.Visibility = Visibility.Collapsed; TodoPanel.Visibility = Visibility.Collapsed; SettingsPanelControl.Visibility = Visibility.Visible;
+        GroupList.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Visible; AddGroupButton.Visibility = Visibility.Collapsed;
+        SearchBox.Visibility = Visibility.Collapsed; TodoWindowButton.Visibility = Visibility.Collapsed; CreateItemButton.Visibility = Visibility.Collapsed;
+        PageTitle.Text = "设置";
+        var panel = _createSettingsPanel();
+        panel.CancelRequested += (_, _) => SwitchMode(todoMode: false);
+        SettingsPanelControl.Content = panel;
+    }
+    private void SettingsNavGeneral_Click(object sender, RoutedEventArgs e) => ScrollSettings("general");
+    private void SettingsNavShortcuts_Click(object sender, RoutedEventArgs e) => ScrollSettings("shortcuts");
+    private void SettingsNavNetwork_Click(object sender, RoutedEventArgs e) => ScrollSettings("network");
+    private void SettingsNavUpdates_Click(object sender, RoutedEventArgs e) => ScrollSettings("updates");
+    private void ScrollSettings(string section)
+    {
+        if (SettingsPanelControl.Content is SettingsPanel panel)
+        {
+            panel.ScrollToSection(section);
+        }
+    }
     private void Window_SourceInitialized(object? sender, EventArgs e) =>
         NativeMethods.InstallMessageHook(this, () => ((App)Application.Current).ShowManager(),
             () => ((App)Application.Current).RefreshRemindersForSystemChange());
@@ -235,6 +261,7 @@ public sealed partial class ManagerWindow : Window
 
     private void SwitchMode(bool todoMode)
     {
+        SettingsModeButton.IsChecked = false; SettingsPanelControl.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Collapsed; GroupList.Visibility = Visibility.Visible; AddGroupButton.Visibility = Visibility.Visible; SearchBox.Visibility = Visibility.Visible; CreateItemButton.Visibility = Visibility.Visible;
         _todoMode = todoMode;
         NoteModeButton.IsChecked = !todoMode;
         TodoModeButton.IsChecked = todoMode;

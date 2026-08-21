@@ -86,6 +86,8 @@
                                       Content="便签" Click="NoteMode_Click" />
                         <ToggleButton x:Name="TodoModeButton" Style="{StaticResource ModeToggleStyle}"
                                       Content="待办" Click="TodoMode_Click" />
+                        <ToggleButton x:Name="SettingsModeButton" Style="{StaticResource ModeToggleStyle}"
+                                      Content="设置" Click="SettingsMode_Click" />
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -100,6 +102,12 @@
                     </Style>
                 </ListBox.ItemContainerStyle>
             </ListBox>
+            <StackPanel x:Name="SettingsNavPanel" Grid.Row="1" Margin="20,18,12,0" Visibility="Collapsed">
+                <Button Style="{StaticResource QuietButtonStyle}" Content="常规" Click="SettingsNavGeneral_Click" />
+                <Button Style="{StaticResource QuietButtonStyle}" Content="快捷键" Click="SettingsNavShortcuts_Click" />
+                <Button Style="{StaticResource QuietButtonStyle}" Content="网络" Click="SettingsNavNetwork_Click" />
+                <Button Style="{StaticResource QuietButtonStyle}" Content="更新" Click="SettingsNavUpdates_Click" />
+            </StackPanel>
             <Grid Grid.Row="2" Margin="10,8,10,14">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
                 <Button x:Name="AddGroupButton" Grid.Column="0" Style="{StaticResource QuietButtonStyle}" Content="+ 新建分组" Click="AddGroup_Click" />
@@ -284,6 +292,7 @@
                 </ListBox>
                 <TextBlock x:Name="TodoCountText" Grid.Row="3" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
             </Grid>
+            <ContentControl x:Name="SettingsPanelControl" Grid.Row="1" Visibility="Collapsed" />
         </Grid>
     </Grid>
 </Window>

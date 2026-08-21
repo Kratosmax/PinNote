@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,5 +10,8 @@
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)temp\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
     <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\bin\**;$(MSBuildProjectDirectory)\obj\**</DefaultItemExcludes>
+    <!-- WPF transient projects reuse the restored parent project assets. -->
+    <BaseIntermediateOutputPath Condition="'$(MSBuildProjectName)' != '' and $([System.String]::Copy('$(MSBuildProjectName)').Contains('_wpftmp'))">$(MSBuildThisFileDirectory)temp\obj\PinNote\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath Condition="'$(MSBuildProjectName)' != '' and $([System.String]::Copy('$(MSBuildProjectName)').Contains('_wpftmp'))">$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>
 </Project>

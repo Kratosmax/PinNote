@@ -8,14 +8,15 @@ using PinNote.Services;
 
 namespace PinNote.Windows;
 
-public sealed partial class SettingsWindow : Window
+public sealed partial class SettingsPanel : UserControl
 {
+    public event EventHandler? CancelRequested;
     private readonly AppSettings _settings;
     private readonly Func<AppSettings, string?> _apply;
     private readonly Func<UpdateNetworkSettings, Task<string>> _checkForUpdates;
     private readonly ObservableCollection<GithubProxyEditorRow> _githubProxies = [];
 
-    public SettingsWindow(
+    public SettingsPanel(
         AppSettings settings,
         Func<AppSettings, string?> apply,
         Func<UpdateNetworkSettings, Task<string>> checkForUpdates,
@@ -41,11 +42,11 @@ public sealed partial class SettingsWindow : Window
         GithubProxyGrid.ItemsSource = _githubProxies;
         HttpProxyBox.Text = settings.UpdateNetwork.Normalize().HttpProxy ?? string.Empty;
     }
-
-    private void Window_SourceInitialized(object? sender, EventArgs e) =>
-        NativeMethods.ApplyBackdrop(this, RootSurface, MaterialBox.IsChecked == true);
-
-    internal void ShowNetworkSettingsForVisualQa() => SettingsTabs.SelectedIndex = 1;
+    internal void ScrollToSection(string section)
+    {
+        FrameworkElement target = section switch { "general" => GeneralSection, "shortcuts" => ShortcutSection, "network" => NetworkSection, "updates" => UpdateSection, _ => GeneralSection };
+        SettingsScrollViewer.ScrollToVerticalOffset(target.TranslatePoint(new Point(0, 0), SettingsScrollViewer).Y + SettingsScrollViewer.VerticalOffset);
+    }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -147,7 +148,7 @@ public sealed partial class SettingsWindow : Window
             ErrorText.Text = error;
             return;
         }
-        DialogResult = true;
+        ErrorText.Text = "设置已保存";
     }
 
     private bool TryBuildNetworkSettings(out UpdateNetworkSettings settings)
@@ -196,7 +197,7 @@ public sealed partial class SettingsWindow : Window
         return true;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void Cancel_Click(object sender, RoutedEventArgs e) => CancelRequested?.Invoke(this, EventArgs.Empty);
 }
 
 internal sealed class GithubProxyEditorRow
