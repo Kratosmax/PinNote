@@ -2,7 +2,7 @@ namespace PinNote.Core.Models;
 
 public sealed class NoteSnapshot
 {
-    public int SchemaVersion { get; set; } = 4;
+    public int SchemaVersion { get; set; } = 5;
 
     public List<NoteDocument> Notes { get; set; } = [];
 
@@ -32,7 +32,7 @@ public sealed class NoteSnapshot
         TodoItems ??= [];
         Settings ??= new AppSettings();
         Settings.Normalize();
-        SchemaVersion = 4;
+        SchemaVersion = 5;
         Notes.RemoveAll(note => note is null);
         Groups.RemoveAll(group => group is null);
         TodoGroups.RemoveAll(group => group is null);
@@ -56,7 +56,7 @@ public sealed class NoteSnapshot
             group.Normalize();
         }
         var todoGroupIds = TodoGroups.Select(group => group.Id).ToHashSet();
-        TodoItems.RemoveAll(item => !todoGroupIds.Contains(item.GroupId));
+        TodoItems.RemoveAll(item => item.DeletedAt is null && !todoGroupIds.Contains(item.GroupId));
         foreach (var item in TodoItems)
         {
             item.Normalize();

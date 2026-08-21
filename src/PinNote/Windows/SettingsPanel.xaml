@@ -101,6 +101,14 @@
                         <CheckBox x:Name="StartWithWindowsBox" Height="38" VerticalContentAlignment="Center" Content="开机时启动 PinNote" />
                         <CheckBox x:Name="MaterialBox" Height="38" VerticalContentAlignment="Center" Content="使用 Windows 11 系统毛玻璃材质" />
                         <CheckBox x:Name="AutoCompleteParentTodoBox" Height="38" VerticalContentAlignment="Center" Content="子待办全部完成后自动完成父待办（不再询问）" />
+                        <Grid Height="50">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition Width="90" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center" Text="回收站保留" />
+                            <TextBox x:Name="RecycleBinDaysBox" Grid.Column="1" Height="34" Padding="10,0"
+                                     VerticalContentAlignment="Center" HorizontalContentAlignment="Right" />
+                            <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextSecondaryBrush}" Text="天（1 到 3650，启动时清理过期项目）" />
+                        </Grid>
                     </StackPanel>
                     <Border Height="1" Margin="0,24" Background="#D7DEE0" />
                     <TextBlock x:Name="ShortcutSection" FontSize="16" FontWeight="SemiBold" Text="快捷键" />

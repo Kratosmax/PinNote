@@ -24,6 +24,8 @@ public sealed class AppSettings
 
     public bool AutoCompleteParentTodo { get; set; }
 
+    public int RecycleBinRetentionDays { get; set; } = 30;
+
     public AppSettings Clone() => new()
     {
         StartWithWindows = StartWithWindows,
@@ -36,7 +38,8 @@ public sealed class AppSettings
         ManagerHotkey = ManagerHotkey,
         UpdateNetwork = new UpdateNetworkSettings(UpdateNetwork.GithubProxies?.ToList(), UpdateNetwork.HttpProxy).Normalize(),
         FavoriteTextColors = FavoriteTextColors?.ToList() ?? [],
-        AutoCompleteParentTodo = AutoCompleteParentTodo
+        AutoCompleteParentTodo = AutoCompleteParentTodo,
+        RecycleBinRetentionDays = RecycleBinRetentionDays
     };
 
     public void CopyFrom(AppSettings source)
@@ -53,6 +56,7 @@ public sealed class AppSettings
         UpdateNetwork = new UpdateNetworkSettings(source.UpdateNetwork.GithubProxies?.ToList(), source.UpdateNetwork.HttpProxy).Normalize();
         FavoriteTextColors = source.FavoriteTextColors?.ToList() ?? [];
         AutoCompleteParentTodo = source.AutoCompleteParentTodo;
+        RecycleBinRetentionDays = source.RecycleBinRetentionDays;
     }
 
     public void Normalize()
@@ -62,6 +66,7 @@ public sealed class AppSettings
         SkippedUpdateVersion = SkippedUpdateVersion?.Trim() ?? string.Empty;
         UpdateNetwork = (UpdateNetwork ?? UpdateNetworkSettings.Default).Normalize();
         FavoriteTextColors = NormalizeFavoriteTextColors(FavoriteTextColors);
+        RecycleBinRetentionDays = Math.Clamp(RecycleBinRetentionDays, 1, 3650);
     }
 
     public bool RememberFavoriteTextColor(string value)

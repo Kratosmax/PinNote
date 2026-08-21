@@ -58,7 +58,7 @@ public sealed partial class TodoGroupWindow : Window
     public void RefreshData()
     {
         GroupTitle.Text = _group.Name;
-        var items = _snapshot.TodoItems.Where(item => item.GroupId == _group.Id).ToArray();
+        var items = _snapshot.TodoItems.Where(item => item.GroupId == _group.Id && item.DeletedAt is null).ToArray();
         var children = items.Where(item => item.ParentId is not null).GroupBy(item => item.ParentId!.Value)
             .ToDictionary(group => group.Key, group => group.OrderBy(item => item.SortOrder).ThenBy(item => item.Title).ToArray());
         _selectedIds.IntersectWith(items.Select(item => item.Id));
@@ -231,6 +231,12 @@ public sealed partial class TodoGroupWindow : Window
 
     private void SetReminder_Click(object sender, RoutedEventArgs e) { if (((FrameworkElement)sender).DataContext is TodoWindowRow row) SetReminder(row); }
     private void ContextReminder_Click(object sender, RoutedEventArgs e) { if (((FrameworkElement)sender).DataContext is TodoWindowRow row) SetReminder(row); }
+    private void ContextDuplicate_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not TodoWindowRow row) return;
+        ItemLifecycle.DuplicateTodoTree(_snapshot.TodoItems, row.Item);
+        NotifyChanged();
+    }
     private void SetReminder(TodoWindowRow row)
     {
         var selection = TodoDialogs.PromptForReminder(this, "设置待办提醒", row.Item.ReminderAt, row.Item.ReminderLevel, true); if (selection is null) return;
@@ -244,9 +250,9 @@ public sealed partial class TodoGroupWindow : Window
     {
         var descendants = TodoPlanner.Descendants(_snapshot.TodoItems, row.Item.Id);
         var suffix = descendants.Count == 0 ? string.Empty : $"及其 {descendants.Count} 项子待办";
-        if (!TodoDialogs.Confirm(this, "删除待办", $"确定删除“{row.Item.Title}”{suffix}吗？此操作无法撤销。", true)) return;
-        var ids = descendants.Select(item => item.Id).Append(row.Item.Id).ToHashSet();
-        _snapshot.TodoItems.RemoveAll(item => ids.Contains(item.Id)); _selectedIds.ExceptWith(ids); NotifyChanged();
+        if (!TodoDialogs.Confirm(this, "删除待办", $"确定将“{row.Item.Title}”{suffix}移入回收站吗？之后可以恢复。", true)) return;
+        var ids = ItemLifecycle.MoveTodoTreeToTrash(_snapshot.TodoItems, row.Item, DateTimeOffset.Now);
+        _selectedIds.ExceptWith(ids); NotifyChanged();
     }
 
     private void MultiSelect_Click(object sender, RoutedEventArgs e) => SetMultiSelect(!_multiSelect);
@@ -281,10 +287,10 @@ public sealed partial class TodoGroupWindow : Window
     {
         var items = SelectedItems(); if (items.Count == 0) return;
         var ids = items.Select(item => item.Id).ToHashSet(); foreach (var item in items) ids.UnionWith(TodoPlanner.Descendants(_snapshot.TodoItems, item.Id).Select(child => child.Id));
-        if (!TodoDialogs.Confirm(this, "批量删除待办", $"确定删除选中的待办及其子待办，共 {ids.Count} 项吗？此操作无法撤销。", true)) return;
-        _snapshot.TodoItems.RemoveAll(item => ids.Contains(item.Id)); _selectedIds.Clear(); NotifyChanged();
+        if (!TodoDialogs.Confirm(this, "批量删除待办", $"确定将选中的待办及其子待办，共 {ids.Count} 项移入回收站吗？", true)) return;
+        foreach (var item in items) ItemLifecycle.MoveTodoTreeToTrash(_snapshot.TodoItems, item, DateTimeOffset.Now); _selectedIds.Clear(); NotifyChanged();
     }
-    private List<TodoItem> SelectedItems() => _snapshot.TodoItems.Where(item => _selectedIds.Contains(item.Id)).ToList();
+    private List<TodoItem> SelectedItems() => _snapshot.TodoItems.Where(item => item.DeletedAt is null && _selectedIds.Contains(item.Id)).ToList();
     private void UpdateSelectionState()
     {
         SelectionText.Text = $"已选 {_selectedIds.Count} 项"; BatchReminderButton.IsEnabled = BatchDeleteButton.IsEnabled = _selectedIds.Count > 0;
@@ -347,7 +353,7 @@ public sealed partial class TodoGroupWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e) { if (_allowClose) return; e.Cancel = true; HideRequested?.Invoke(this); }
     private void Window_GeometryChanged(object? sender, EventArgs e) { if (_initializing || WindowState != WindowState.Normal) return; CaptureGeometry(); GeometryChanged?.Invoke(this); }
     private void EnsureVisibleOnScreen() { var area = SystemParameters.WorkArea; Left = Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)); Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)); }
-    private void SetStaticReminderVisual() { var overdue = _snapshot.TodoItems.Any(item => item.GroupId == _group.Id && item.IsOverdue(DateTimeOffset.Now)); FrameBorder.BorderThickness = new Thickness(overdue ? 2 : 1); FrameBorder.BorderBrush = overdue ? OverdueBorderBrush : DefaultBorderBrush; }
+    private void SetStaticReminderVisual() { var overdue = _snapshot.TodoItems.Any(item => item.GroupId == _group.Id && item.DeletedAt is null && item.IsOverdue(DateTimeOffset.Now)); FrameBorder.BorderThickness = new Thickness(overdue ? 2 : 1); FrameBorder.BorderBrush = overdue ? OverdueBorderBrush : DefaultBorderBrush; }
 
     private enum DropMode { None, Before, Child, After }
 
@@ -373,6 +379,7 @@ public sealed partial class TodoGroupWindow : Window
         public string ExpandGlyph => IsCollapsed ? "\uE76C" : "\uE70D";
         public Visibility StrikeVisibility => Item.IsCompleted ? Visibility.Visible : Visibility.Collapsed;
         public Brush Foreground => Item.IsCompleted ? Resource("TextSecondaryBrush") : Item.IsOverdue(DateTimeOffset.Now) ? Resource("DangerBrush") : Resource("TextPrimaryBrush");
+        public Visibility ReminderVisibility => Item.ReminderAt is null ? Visibility.Collapsed : Visibility.Visible;
         public string ReminderText => Item.ReminderAt is not { } due ? string.Empty : $"{(Item.IsOverdue(DateTimeOffset.Now) ? "已逾期 · " : string.Empty)}{due.LocalDateTime:MM-dd HH:mm:ss} · {LevelLabel(Item.ReminderLevel)}";
         public Brush ReminderBrush => Item.IsOverdue(DateTimeOffset.Now) ? Resource("DangerBrush") : Resource("TextSecondaryBrush");
         public Brush DropBackground { get => _dropBackground; private set { _dropBackground = value; OnPropertyChanged(); } }

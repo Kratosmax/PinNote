@@ -55,6 +55,8 @@ public sealed partial class NoteWindow : Window
 
     public event Action<NoteWindow>? DeleteRequested;
 
+    public event Action<NoteWindow>? DuplicateRequested;
+
     public event Action<NoteWindow>? HideRequested;
 
     public event Action<string>? FavoriteTextColorAdded;
@@ -333,6 +335,8 @@ public sealed partial class NoteWindow : Window
 
     private void NewNote_Click(object sender, RoutedEventArgs e) => NewRequested?.Invoke(this);
 
+    private void DuplicateNote_Click(object sender, RoutedEventArgs e) => DuplicateRequested?.Invoke(this);
+
     private void HideNote_Click(object sender, RoutedEventArgs e) => HideRequested?.Invoke(this);
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
@@ -418,7 +422,7 @@ public sealed partial class NoteWindow : Window
 
     private void DeleteNote_Click(object sender, RoutedEventArgs e)
     {
-        var result = MessageBox.Show(this, "删除后无法恢复。确定删除这张便签吗？", "删除便签", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        var result = MessageBox.Show(this, "删除后会移入回收站。确定删除这张便签吗？", "删除便签", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (result == MessageBoxResult.Yes)
         {
             DeleteRequested?.Invoke(this);

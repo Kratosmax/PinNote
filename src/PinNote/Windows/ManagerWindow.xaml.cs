@@ -21,16 +21,21 @@ public sealed partial class ManagerWindow : Window
     private readonly Action<NoteDocument> _openNote;
     private readonly Action<NoteDocument, bool> _setVisibility;
     private readonly Action<NoteDocument> _deleteNote;
+    private readonly Func<NoteDocument, NoteDocument> _duplicateNote;
+    private readonly Action<NoteDocument> _restoreNote;
+    private readonly Action<NoteDocument> _purgeNote;
     private readonly Action<TodoGroup, bool> _setTodoGroupVisibility;
     private readonly Action _changed;
     private readonly Func<SettingsPanel> _createSettingsPanel;
     private readonly ObservableCollection<NoteRow> _noteRows = [];
     private readonly ObservableCollection<TodoRow> _todoRows = [];
+    private readonly ObservableCollection<OverviewRow> _overviewRows = [];
     private readonly ObservableCollection<GroupChoice> _groupChoices = [];
     private readonly HashSet<Guid> _selectedNotes = [];
     private readonly HashSet<Guid> _selectedTodos = [];
     private readonly Dictionary<Guid, int> _completionGenerations = [];
     private bool _todoMode;
+    private OverviewMode _overviewMode;
     private bool _noteMultiSelect;
     private bool _todoMultiSelect;
     private bool _updatingSelectAll;
@@ -38,6 +43,7 @@ public sealed partial class ManagerWindow : Window
 
     public ManagerWindow(NoteSnapshot snapshot, Func<NoteDocument> createNote, Action<NoteDocument> openNote,
         Action<NoteDocument, bool> setVisibility, Action<NoteDocument> deleteNote,
+        Func<NoteDocument, NoteDocument> duplicateNote, Action<NoteDocument> restoreNote, Action<NoteDocument> purgeNote,
         Action<TodoGroup, bool> setTodoGroupVisibility, Action changed, Func<SettingsPanel> createSettingsPanel)
     {
         InitializeComponent();
@@ -46,12 +52,28 @@ public sealed partial class ManagerWindow : Window
         _openNote = openNote;
         _setVisibility = setVisibility;
         _deleteNote = deleteNote;
+        _duplicateNote = duplicateNote;
+        _restoreNote = restoreNote;
+        _purgeNote = purgeNote;
         _setTodoGroupVisibility = setTodoGroupVisibility;
         _changed = changed;
         _createSettingsPanel = createSettingsPanel;
         DataContext = this;
         NoteList.ItemsSource = _noteRows;
         TodoList.ItemsSource = _todoRows;
+        OverviewList.ItemsSource = _overviewRows;
+        SearchFilterCombo.ItemsSource = new[]
+        {
+            new SearchFilterOption(SearchFilter.CurrentView, "当前视图"),
+            new SearchFilterOption(SearchFilter.All, "全部"),
+            new SearchFilterOption(SearchFilter.Notes, "便签"),
+            new SearchFilterOption(SearchFilter.Todos, "待办"),
+            new SearchFilterOption(SearchFilter.WithReminder, "有提醒"),
+            new SearchFilterOption(SearchFilter.Overdue, "已逾期"),
+            new SearchFilterOption(SearchFilter.CompletedTodos, "已完成待办"),
+            new SearchFilterOption(SearchFilter.IncompleteTodos, "未完成待办")
+        };
+        SearchFilterCombo.SelectedIndex = 0;
         BatchGroupCombo.ItemsSource = _groupChoices;
         RefreshAll();
     }
@@ -81,6 +103,8 @@ public sealed partial class ManagerWindow : Window
     }
 
     internal void ShowTodoModeForVisualQa() => SwitchMode(todoMode: true);
+    public void ShowNoteMode() => SwitchMode(todoMode: false);
+    public void ShowTodoMode() => SwitchMode(todoMode: true);
 
     internal void SelectTodosForVisualQa()
     {
@@ -98,14 +122,37 @@ public sealed partial class ManagerWindow : Window
         TryPromptForReminder("视觉测试：待办提醒", DateTimeOffset.Now.AddHours(1), ReminderLevel.Strong,
             true, out _, out _);
 
+    internal void ShowUnifiedSearchForVisualQa()
+    {
+        SearchBox.Text = string.Empty;
+        SearchFilterCombo.SelectedIndex = 1;
+        ShowOverview(OverviewMode.UnifiedSearch);
+    }
+
+    internal void ShowReminderCenterForVisualQa()
+    {
+        SearchBox.Text = string.Empty;
+        ShowOverview(OverviewMode.ReminderCenter);
+    }
+
+    internal void ShowRecycleBinForVisualQa()
+    {
+        SearchBox.Text = string.Empty;
+        ShowOverview(OverviewMode.RecycleBin);
+    }
+
     public void ShowSettingsMode() => SettingsMode_Click(this, new RoutedEventArgs());
     private void SettingsMode_Click(object sender, RoutedEventArgs e)
     {
+        _overviewMode = OverviewMode.None;
         _todoMode = false;
         NoteModeButton.IsChecked = false; TodoModeButton.IsChecked = false; SettingsModeButton.IsChecked = true;
-        NotePanel.Visibility = Visibility.Collapsed; TodoPanel.Visibility = Visibility.Collapsed; SettingsPanelControl.Visibility = Visibility.Visible;
-        GroupList.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Visible; AddGroupButton.Visibility = Visibility.Collapsed;
-        SearchBox.Visibility = Visibility.Collapsed; TodoWindowButton.Visibility = Visibility.Collapsed; CreateItemButton.Visibility = Visibility.Collapsed;
+        NotePanel.Visibility = Visibility.Collapsed; TodoPanel.Visibility = Visibility.Collapsed;
+        OverviewPanel.Visibility = Visibility.Collapsed; SettingsPanelControl.Visibility = Visibility.Visible;
+        GroupList.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Visible;
+        OverviewNavPanel.Visibility = Visibility.Collapsed; AddGroupButton.Visibility = Visibility.Collapsed;
+        SearchBox.Visibility = Visibility.Collapsed; SearchFilterCombo.Visibility = Visibility.Collapsed;
+        TodoWindowButton.Visibility = Visibility.Collapsed; CreateItemButton.Visibility = Visibility.Collapsed;
         PageTitle.Text = "设置";
         var panel = _createSettingsPanel();
         panel.CancelRequested += (_, _) => SwitchMode(todoMode: false);
@@ -135,6 +182,11 @@ public sealed partial class ManagerWindow : Window
 
     public void RefreshAll()
     {
+        if (_overviewMode != OverviewMode.None)
+        {
+            RefreshOverview();
+            return;
+        }
         var selectedId = (GroupList.SelectedItem as GroupFilter)?.Id;
         BuildGroupList(selectedId);
         ApplyFilter();
@@ -176,6 +228,7 @@ public sealed partial class ManagerWindow : Window
         if (GroupList.SelectedItem is not GroupFilter filter) return;
         var query = SearchBox.Text.Trim();
         var notes = _snapshot.Notes.Where(note =>
+            note.DeletedAt is null &&
             (filter.IsUngrouped ? note.GroupId is null : filter.Id is null || note.GroupId == filter.Id) &&
             (query.Length == 0 || note.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
              PlainText(note).Contains(query, StringComparison.CurrentCultureIgnoreCase)))
@@ -201,7 +254,7 @@ public sealed partial class ManagerWindow : Window
             return;
         }
 
-        var items = _snapshot.TodoItems.Where(item => item.GroupId == groupId).ToArray();
+        var items = _snapshot.TodoItems.Where(item => item.GroupId == groupId && item.DeletedAt is null).ToArray();
         var query = SearchBox.Text.Trim();
         HashSet<Guid>? visible = null;
         if (query.Length > 0)
@@ -261,23 +314,171 @@ public sealed partial class ManagerWindow : Window
 
     private void SwitchMode(bool todoMode)
     {
-        SettingsModeButton.IsChecked = false; SettingsPanelControl.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Collapsed; GroupList.Visibility = Visibility.Visible; AddGroupButton.Visibility = Visibility.Visible; SearchBox.Visibility = Visibility.Visible; CreateItemButton.Visibility = Visibility.Visible;
+        _overviewMode = OverviewMode.None;
+        SettingsModeButton.IsChecked = false; SettingsPanelControl.Visibility = Visibility.Collapsed;
+        SettingsNavPanel.Visibility = Visibility.Collapsed; OverviewNavPanel.Visibility = Visibility.Visible;
+        OverviewPanel.Visibility = Visibility.Collapsed; GroupList.Visibility = Visibility.Visible;
+        AddGroupButton.Visibility = Visibility.Visible; SearchBox.Visibility = Visibility.Visible;
+        SearchFilterCombo.Visibility = Visibility.Visible; CreateItemButton.Visibility = Visibility.Visible;
         _todoMode = todoMode;
         NoteModeButton.IsChecked = !todoMode;
         TodoModeButton.IsChecked = todoMode;
         NotePanel.Visibility = todoMode ? Visibility.Collapsed : Visibility.Visible;
         TodoPanel.Visibility = todoMode ? Visibility.Visible : Visibility.Collapsed;
         TodoWindowButton.Visibility = todoMode ? Visibility.Visible : Visibility.Collapsed;
+        if (SearchFilterCombo.SelectedItem is not SearchFilterOption { Filter: SearchFilter.CurrentView })
+            SearchFilterCombo.SelectedIndex = 0;
         if (todoMode) SetNoteMultiSelect(false); else SetTodoMultiSelect(false);
-        CreateItemButton.Content = todoMode ? "+ \u65b0\u5efa\u5f85\u529e" : "+ \u65b0\u5efa\u4fbf\u7b7e";
-        AddGroupButton.Content = todoMode ? "+ \u5f85\u529e\u5206\u7ec4" : "+ \u65b0\u5efa\u5206\u7ec4";
-        SearchBox.ToolTip = todoMode ? "\u641c\u7d22\u5f85\u529e\u6807\u9898" : "\u641c\u7d22\u6807\u9898\u6216\u6b63\u6587";
+        CreateItemButton.Content = todoMode ? "+ 新建待办" : "+ 新建便签";
+        AddGroupButton.Content = todoMode ? "+ 待办分组" : "+ 新建分组";
+        SearchBox.ToolTip = todoMode ? "搜索待办标题" : "搜索标题或正文";
         if (todoMode && _snapshot.TodoGroups.Count == 0)
         {
-            _snapshot.TodoGroups.Add(new TodoGroup { Name = "\u6211\u7684\u5f85\u529e" });
+            _snapshot.TodoGroups.Add(new TodoGroup { Name = "我的待办" });
             _changed();
         }
         RefreshAll();
+    }
+
+    private void SearchFilter_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (SearchFilterCombo.SelectedItem is not SearchFilterOption option) return;
+        if (option.Filter == SearchFilter.CurrentView)
+        {
+            if (_overviewMode == OverviewMode.UnifiedSearch) SwitchMode(_todoMode);
+            else ApplyFilter();
+            return;
+        }
+        ShowOverview(OverviewMode.UnifiedSearch);
+    }
+
+    private void ReminderCenter_Click(object sender, RoutedEventArgs e) => ShowOverview(OverviewMode.ReminderCenter);
+    private void RecycleBin_Click(object sender, RoutedEventArgs e) => ShowOverview(OverviewMode.RecycleBin);
+
+    private void ShowOverview(OverviewMode mode)
+    {
+        _overviewMode = mode;
+        NoteModeButton.IsChecked = false; TodoModeButton.IsChecked = false; SettingsModeButton.IsChecked = false;
+        NotePanel.Visibility = Visibility.Collapsed; TodoPanel.Visibility = Visibility.Collapsed;
+        SettingsPanelControl.Visibility = Visibility.Collapsed; OverviewPanel.Visibility = Visibility.Visible;
+        GroupList.Visibility = Visibility.Collapsed; SettingsNavPanel.Visibility = Visibility.Collapsed;
+        OverviewNavPanel.Visibility = Visibility.Visible; AddGroupButton.Visibility = Visibility.Collapsed;
+        SearchBox.Visibility = Visibility.Visible;
+        SearchFilterCombo.Visibility = mode == OverviewMode.UnifiedSearch ? Visibility.Visible : Visibility.Collapsed;
+        TodoWindowButton.Visibility = Visibility.Collapsed; CreateItemButton.Visibility = Visibility.Collapsed;
+        PageTitle.Text = mode switch
+        {
+            OverviewMode.ReminderCenter => "提醒中心",
+            OverviewMode.RecycleBin => "回收站",
+            _ => "统一搜索"
+        };
+        SearchBox.ToolTip = "搜索便签和待办";
+        RefreshOverview();
+    }
+
+    private void RefreshOverview()
+    {
+        _overviewRows.Clear();
+        var now = DateTimeOffset.Now;
+        var query = SearchBox.Text.Trim();
+        var filter = (SearchFilterCombo.SelectedItem as SearchFilterOption)?.Filter ?? SearchFilter.All;
+
+        if (_overviewMode == OverviewMode.RecycleBin)
+        {
+            foreach (var note in _snapshot.Notes.Where(note => note.DeletedAt is not null && Matches(note.Title, PlainText(note), query))
+                         .OrderByDescending(note => note.DeletedAt))
+                _overviewRows.Add(OverviewRow.ForTrash(note, $"删除于 {note.DeletedAt!.Value.LocalDateTime:yyyy-MM-dd HH:mm}"));
+            foreach (var todo in _snapshot.TodoItems.Where(item => item.DeletedAt is not null && Matches(item.Title, string.Empty, query))
+                         .OrderByDescending(item => item.DeletedAt))
+                _overviewRows.Add(OverviewRow.ForTrash(todo, $"删除于 {todo.DeletedAt!.Value.LocalDateTime:yyyy-MM-dd HH:mm}"));
+        }
+        else
+        {
+            var notes = _snapshot.Notes.Where(note => note.DeletedAt is null && Matches(note.Title, PlainText(note), query));
+            var todos = _snapshot.TodoItems.Where(item => item.DeletedAt is null && Matches(item.Title, string.Empty, query));
+            if (_overviewMode == OverviewMode.ReminderCenter)
+            {
+                notes = notes.Where(note => note.ReminderAt is not null);
+                todos = todos.Where(item => item.ReminderAt is not null && !item.IsCompleted);
+            }
+            else
+            {
+                notes = filter switch
+                {
+                    SearchFilter.Todos or SearchFilter.CompletedTodos or SearchFilter.IncompleteTodos => [],
+                    SearchFilter.WithReminder => notes.Where(note => note.ReminderAt is not null),
+                    SearchFilter.Overdue => notes.Where(note => note.IsOverdue(now)),
+                    _ => notes
+                };
+                todos = filter switch
+                {
+                    SearchFilter.Notes => [],
+                    SearchFilter.WithReminder => todos.Where(item => item.ReminderAt is not null),
+                    SearchFilter.Overdue => todos.Where(item => item.IsOverdue(now)),
+                    SearchFilter.CompletedTodos => todos.Where(item => item.IsCompleted),
+                    SearchFilter.IncompleteTodos => todos.Where(item => !item.IsCompleted),
+                    _ => todos
+                };
+            }
+
+            foreach (var note in notes.OrderByDescending(note => note.ReminderAt ?? note.ModifiedAt))
+                _overviewRows.Add(OverviewRow.ForActive(note, PlainText(note), ReminderStatus(note.ReminderAt, note.IsOverdue(now))));
+            foreach (var todo in todos.OrderByDescending(item => item.ReminderAt ?? item.CompletedAt ?? DateTimeOffset.MinValue))
+            {
+                var groupName = _snapshot.TodoGroups.FirstOrDefault(group => group.Id == todo.GroupId)?.Name ?? "待办";
+                var status = todo.IsCompleted ? "已完成" : ReminderStatus(todo.ReminderAt, todo.IsOverdue(now));
+                _overviewRows.Add(OverviewRow.ForActive(todo, groupName, status));
+            }
+        }
+
+        OverviewCountText.Text = $"{_overviewRows.Count} 项";
+    }
+
+    private static bool Matches(string title, string body, string query) =>
+        query.Length == 0 || title.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+        body.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+
+    private static string ReminderStatus(DateTimeOffset? due, bool overdue) =>
+        due is null ? "未设置提醒" : $"{(overdue ? "已逾期 · " : string.Empty)}{due.Value.LocalDateTime:MM-dd HH:mm:ss}";
+
+    private void OverviewOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not OverviewRow row) return;
+        if (row.Note is { } note) _openNote(note);
+        if (row.Todo is { } todo && _snapshot.TodoGroups.FirstOrDefault(group => group.Id == todo.GroupId) is { } group)
+            _setTodoGroupVisibility(group, true);
+    }
+
+    private void OverviewDuplicate_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not OverviewRow row) return;
+        if (row.Note is { } note) _duplicateNote(note);
+        else if (row.Todo is { } todo) { ItemLifecycle.DuplicateTodoTree(_snapshot.TodoItems, todo); _changed(); }
+        RefreshOverview();
+    }
+
+    private void OverviewRestore_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not OverviewRow row) return;
+        if (row.Note is { } note) _restoreNote(note);
+        else if (row.Todo is { } todo) { ItemLifecycle.RestoreTodoTree(_snapshot, todo); _changed(); }
+        RefreshOverview();
+    }
+
+    private void OverviewPurge_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not OverviewRow row ||
+            MessageBox.Show(this, $"永久删除“{row.Title}”？此操作无法撤销。", "永久删除",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (row.Note is { } note) _purgeNote(note);
+        else if (row.Todo is { } todo)
+        {
+            var ids = TodoPlanner.Descendants(_snapshot.TodoItems, todo.Id, includeDeleted: true)
+                .Select(item => item.Id).Append(todo.Id).ToHashSet();
+            _snapshot.TodoItems.RemoveAll(item => ids.Contains(item.Id));
+            _changed();
+        }
+        RefreshOverview();
     }
 
     private void ShowTodoWindow_Click(object sender, RoutedEventArgs e)
@@ -326,7 +527,7 @@ public sealed partial class ManagerWindow : Window
     }
 
     private void GroupList_SelectionChanged(object sender, SelectionChangedEventArgs e) => ApplyFilter();
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyFilter();
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { if (_overviewMode == OverviewMode.None) ApplyFilter(); else RefreshOverview(); }
 
     private void CreateItem_Click(object sender, RoutedEventArgs e)
     {
@@ -370,6 +571,12 @@ public sealed partial class ManagerWindow : Window
         if (((FrameworkElement)sender).DataContext is not NoteRow row) return;
         _setVisibility(row.Note, row.Note.IsHidden);
         ApplyNoteFilter();
+    }
+
+    private void DuplicateNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is NoteRow row) _duplicateNote(row.Note);
+        RefreshAll();
     }
 
     private void DeleteNote_Click(object sender, RoutedEventArgs e)
@@ -446,7 +653,7 @@ public sealed partial class ManagerWindow : Window
         ApplyNoteFilter();
     }
 
-    private List<NoteDocument> SelectedNotes() => _snapshot.Notes.Where(note => _selectedNotes.Contains(note.Id)).ToList();
+    private List<NoteDocument> SelectedNotes() => _snapshot.Notes.Where(note => note.DeletedAt is null && _selectedNotes.Contains(note.Id)).ToList();
 
     private void UpdateNoteBatchState()
     {
@@ -514,7 +721,8 @@ public sealed partial class ManagerWindow : Window
             var count = _snapshot.TodoItems.Count(item => item.GroupId == groupId);
             if (MessageBox.Show(this, $"\u5220\u9664\u5f85\u529e\u5206\u7ec4\u201c{group.Name}\u201d\u53ca\u5176\u4e2d {count} \u9879\u5f85\u529e\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002",
                     "\u5220\u9664\u5f85\u529e\u5206\u7ec4", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-            _snapshot.TodoItems.RemoveAll(item => item.GroupId == groupId);
+            foreach (var item in _snapshot.TodoItems.Where(item => item.GroupId == groupId && item.DeletedAt is null).ToArray())
+                ItemLifecycle.MoveTodoTreeToTrash(_snapshot.TodoItems, item, DateTimeOffset.Now);
             _snapshot.TodoGroups.Remove(group);
             _selectedTodos.Clear();
         }
@@ -600,6 +808,14 @@ public sealed partial class ManagerWindow : Window
         _changed();
         ApplyTodoFilter();
     }
+    private void DuplicateTodo_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).DataContext is not TodoRow row) return;
+        ItemLifecycle.DuplicateTodoTree(_snapshot.TodoItems, row.Item);
+        _changed();
+        ApplyTodoFilter();
+    }
+
     private void DeleteTodo_Click(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).DataContext is not TodoRow row) return;
@@ -607,8 +823,7 @@ public sealed partial class ManagerWindow : Window
         var suffix = descendants.Count == 0 ? string.Empty : $"\u53ca\u5176 {descendants.Count} \u9879\u5b50\u5f85\u529e";
         if (MessageBox.Show(this, $"\u786e\u5b9a\u5220\u9664\u201c{row.Item.Title}\u201d{suffix}\u5417\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002", "\u5220\u9664\u5f85\u529e",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        var ids = descendants.Select(item => item.Id).Append(row.Item.Id).ToHashSet();
-        _snapshot.TodoItems.RemoveAll(item => ids.Contains(item.Id));
+        var ids = ItemLifecycle.MoveTodoTreeToTrash(_snapshot.TodoItems, row.Item, DateTimeOffset.Now);
         _selectedTodos.ExceptWith(ids);
         _changed();
         ApplyTodoFilter();
@@ -663,13 +878,13 @@ public sealed partial class ManagerWindow : Window
             ids.UnionWith(TodoPlanner.Descendants(_snapshot.TodoItems, item.Id).Select(descendant => descendant.Id));
         if (MessageBox.Show(this, $"\u786e\u5b9a\u5220\u9664\u9009\u4e2d\u7684\u5f85\u529e\u53ca\u5176\u5b50\u5f85\u529e\uff0c\u5171 {ids.Count} \u9879\u5417\uff1f\u6b64\u64cd\u4f5c\u65e0\u6cd5\u64a4\u9500\u3002",
                 "\u6279\u91cf\u5220\u9664\u5f85\u529e", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _snapshot.TodoItems.RemoveAll(item => ids.Contains(item.Id));
+        foreach (var item in selected) ItemLifecycle.MoveTodoTreeToTrash(_snapshot.TodoItems, item, DateTimeOffset.Now);
         _selectedTodos.ExceptWith(ids);
         _changed();
         ApplyTodoFilter();
     }
 
-    private List<TodoItem> SelectedTodos() => _snapshot.TodoItems.Where(item => _selectedTodos.Contains(item.Id)).ToList();
+    private List<TodoItem> SelectedTodos() => _snapshot.TodoItems.Where(item => item.DeletedAt is null && _selectedTodos.Contains(item.Id)).ToList();
 
     private void UpdateTodoBatchState()
     {
@@ -731,6 +946,44 @@ public sealed partial class ManagerWindow : Window
             : (Brush)Application.Current.FindResource("TextSecondaryBrush");
     }
 
+    private enum OverviewMode { None, UnifiedSearch, ReminderCenter, RecycleBin }
+    private enum SearchFilter { CurrentView, All, Notes, Todos, WithReminder, Overdue, CompletedTodos, IncompleteTodos }
+    private sealed record SearchFilterOption(SearchFilter Filter, string Name)
+    {
+        public override string ToString() => Name;
+    }
+
+    private sealed class OverviewRow
+    {
+        private OverviewRow(string kind, string title, string subtitle, string status, NoteDocument? note, TodoItem? todo, bool trash)
+        {
+            Kind = kind; Title = title; Subtitle = subtitle; Status = status; Note = note; Todo = todo; IsTrash = trash;
+        }
+
+        public string Kind { get; }
+        public string Title { get; }
+        public string Subtitle { get; }
+        public string Status { get; }
+        public NoteDocument? Note { get; }
+        public TodoItem? Todo { get; }
+        public bool IsTrash { get; }
+        public Brush StatusBrush => Status.StartsWith("已逾期", StringComparison.Ordinal)
+            ? (Brush)Application.Current.FindResource("DangerBrush")
+            : (Brush)Application.Current.FindResource("TextSecondaryBrush");
+        public Visibility OpenVisibility => IsTrash ? Visibility.Collapsed : Visibility.Visible;
+        public Visibility DuplicateVisibility => IsTrash ? Visibility.Collapsed : Visibility.Visible;
+        public Visibility RestoreVisibility => IsTrash ? Visibility.Visible : Visibility.Collapsed;
+        public Visibility PurgeVisibility => IsTrash ? Visibility.Visible : Visibility.Collapsed;
+
+        public static OverviewRow ForActive(NoteDocument note, string subtitle, string status) =>
+            new("便签", note.Title, string.IsNullOrWhiteSpace(subtitle) ? "暂无正文" : subtitle.ReplaceLineEndings(" "), status, note, null, false);
+        public static OverviewRow ForActive(TodoItem todo, string subtitle, string status) =>
+            new("待办", todo.Title, subtitle, status, null, todo, false);
+        public static OverviewRow ForTrash(NoteDocument note, string status) =>
+            new("便签", note.Title, "可恢复", status, note, null, true);
+        public static OverviewRow ForTrash(TodoItem todo, string status) =>
+            new("待办", todo.Title, "包含其子级时会一并恢复", status, null, todo, true);
+    }
     private sealed class TodoRow : INotifyPropertyChanged
     {
         public TodoRow(TodoItem item, int depth, bool selected)

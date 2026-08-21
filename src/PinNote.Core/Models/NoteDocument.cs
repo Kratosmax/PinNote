@@ -32,6 +32,8 @@ public sealed class NoteDocument
 
     public DateTimeOffset? LastTriggeredAt { get; set; }
 
+    public DateTimeOffset? DeletedAt { get; set; }
+
     public bool IsOverdue(DateTimeOffset now) => ReminderAt is { } due && due <= now;
 
     public NoteDocument Clone() => new()
@@ -50,7 +52,8 @@ public sealed class NoteDocument
         ReminderAt = ReminderAt,
         ReminderLevel = ReminderLevel,
         ReminderState = ReminderState,
-        LastTriggeredAt = LastTriggeredAt
+        LastTriggeredAt = LastTriggeredAt,
+        DeletedAt = DeletedAt
     };
 
     public void Normalize()

@@ -6,13 +6,13 @@ public static class TodoPlanner
 {
     public static IReadOnlyList<TodoItem> GetDue(IEnumerable<TodoItem> items, DateTimeOffset now) =>
         items
-            .Where(item => !item.IsCompleted && item.ReminderAt is { } due && due <= now && item.ReminderState == ReminderState.Scheduled)
+            .Where(item => item.DeletedAt is null && !item.IsCompleted && item.ReminderAt is { } due && due <= now && item.ReminderState == ReminderState.Scheduled)
             .OrderBy(item => item.ReminderAt)
             .ToArray();
 
     public static DateTimeOffset? GetNextDue(IEnumerable<TodoItem> items, DateTimeOffset now) =>
         items
-            .Where(item => !item.IsCompleted && item.ReminderAt is { } due && due > now && item.ReminderState == ReminderState.Scheduled)
+            .Where(item => item.DeletedAt is null && !item.IsCompleted && item.ReminderAt is { } due && due > now && item.ReminderState == ReminderState.Scheduled)
             .Select(item => item.ReminderAt!.Value)
             .DefaultIfEmpty()
             .Min() is var next && next != default ? next : null;
@@ -34,7 +34,7 @@ public static class TodoPlanner
 
     public static void Trigger(TodoItem item, DateTimeOffset now)
     {
-        if (item.ReminderAt is null || item.ReminderState != ReminderState.Scheduled || item.IsCompleted)
+        if (item.DeletedAt is not null || item.ReminderAt is null || item.ReminderState != ReminderState.Scheduled || item.IsCompleted)
         {
             return;
         }
@@ -63,7 +63,7 @@ public static class TodoPlanner
         DateTimeOffset now,
         Func<TodoItem, bool> shouldComplete)
     {
-        var allItems = items.ToArray();
+        var allItems = items.Where(todo => todo.DeletedAt is null).ToArray();
         var completed = new List<TodoItem>();
         var parentId = item.ParentId;
         while (parentId is { } id && allItems.FirstOrDefault(todo => todo.Id == id) is { } parent)
@@ -88,9 +88,9 @@ public static class TodoPlanner
         return completed;
     }
 
-    public static IReadOnlyList<TodoItem> Descendants(IEnumerable<TodoItem> items, Guid parentId)
+    public static IReadOnlyList<TodoItem> Descendants(IEnumerable<TodoItem> items, Guid parentId, bool includeDeleted = false)
     {
-        var byParent = items.Where(item => item.ParentId is not null).GroupBy(item => item.ParentId!.Value).ToDictionary(group => group.Key, group => group.ToArray());
+        var byParent = items.Where(item => item.ParentId is not null && (includeDeleted || item.DeletedAt is null)).GroupBy(item => item.ParentId!.Value).ToDictionary(group => group.Key, group => group.ToArray());
         var result = new List<TodoItem>();
         var queue = new Queue<Guid>();
         queue.Enqueue(parentId);
@@ -111,7 +111,7 @@ public static class TodoPlanner
         bool makeChild,
         bool insertAfter = false)
     {
-        if (dragged.Id == target.Id || dragged.GroupId != target.GroupId ||
+        if (dragged.DeletedAt is not null || target.DeletedAt is not null || dragged.Id == target.Id || dragged.GroupId != target.GroupId ||
             Descendants(items, dragged.Id).Any(item => item.Id == target.Id))
         {
             return false;
@@ -122,7 +122,7 @@ public static class TodoPlanner
         dragged.ParentId = newParentId;
 
         var siblings = items
-            .Where(item => item.GroupId == dragged.GroupId && item.ParentId == newParentId && item.Id != dragged.Id)
+            .Where(item => item.DeletedAt is null && item.GroupId == dragged.GroupId && item.ParentId == newParentId && item.Id != dragged.Id)
             .OrderBy(item => item.SortOrder)
             .ThenBy(item => item.Title)
             .ToList();
@@ -136,7 +136,7 @@ public static class TodoPlanner
         if (oldParentId != newParentId)
         {
             Renumber(items
-                .Where(item => item.GroupId == dragged.GroupId && item.ParentId == oldParentId && item.Id != dragged.Id)
+                .Where(item => item.DeletedAt is null && item.GroupId == dragged.GroupId && item.ParentId == oldParentId && item.Id != dragged.Id)
                 .OrderBy(item => item.SortOrder));
         }
 

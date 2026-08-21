@@ -24,6 +24,8 @@ public sealed class TodoItem
 
     public DateTimeOffset? LastTriggeredAt { get; set; }
 
+    public DateTimeOffset? DeletedAt { get; set; }
+
     public bool IsOverdue(DateTimeOffset now) =>
         !IsCompleted && ReminderAt is { } due && due <= now;
 
@@ -39,7 +41,8 @@ public sealed class TodoItem
         ReminderAt = ReminderAt,
         ReminderLevel = ReminderLevel,
         ReminderState = ReminderState,
-        LastTriggeredAt = LastTriggeredAt
+        LastTriggeredAt = LastTriggeredAt,
+        DeletedAt = DeletedAt
     };
 
     public void Normalize()

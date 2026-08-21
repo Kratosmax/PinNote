@@ -13,6 +13,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("reminder transitions preserve overdue state", TestTransitions),
     ("todo hierarchy, reminders, and completion normalize safely", TestTodos),
     ("todo drag reorder and reparent reject hierarchy cycles", TestTodoMove),
+    ("trash lifecycle, restore, duplicate, and purge are safe", TestItemLifecycle),
+    ("snooze presets calculate precise due times", TestSnoozePlanner),
     ("snapshot clone is independent", TestClone),
     ("schema normalization preserves groups and note state", TestSchema),
     ("favorite text colors normalize and persist", TestFavoriteTextColors),
@@ -116,7 +118,7 @@ static Task TestTodos()
     snapshot.Settings.AutoCompleteParentTodo = true;
     snapshot.Normalize();
 
-    Assert(snapshot.SchemaVersion == 4 && group.Name == "发布", "Todo data should upgrade to schema 4 and normalize group names.");
+    Assert(snapshot.SchemaVersion == 5 && group.Name == "发布", "Todo data should upgrade to schema 5 and normalize group names.");
     Assert(group.Left == 245 && group.Top == 180 && group.Width == 520 && group.Height == 610 &&
            group.PinMode == PinMode.AlwaysOnTop && group.IsHidden,
         "Todo group window geometry, pin mode, and visibility should survive normalization.");
@@ -166,11 +168,81 @@ static Task TestTodoMove()
     Assert(TodoPlanner.Move(items, third, first, makeChild: false), "A root todo should move before another root todo.");
     Assert(third.ParentId is null && third.SortOrder == 0 && first.SortOrder == 1 && second.SortOrder == 2,
         "Root siblings should be renumbered after a reorder.");
+    var deletedSibling = new TodoItem { GroupId = group.Id, ParentId = first.Id, Title = "已删除", SortOrder = 99, DeletedAt = DateTimeOffset.Now };
+    items.Add(deletedSibling);
     Assert(TodoPlanner.Move(items, second, first, makeChild: true), "A todo should become the target todo's last child.");
-    Assert(second.ParentId == first.Id && child.SortOrder == 0 && second.SortOrder == 1,
+    Assert(second.ParentId == first.Id && child.SortOrder == 0 && second.SortOrder == 1 && deletedSibling.SortOrder == 99,
         "Reparenting should preserve existing children and append the dragged todo.");
     Assert(!TodoPlanner.Move(items, first, child, makeChild: true), "A parent cannot be moved under its descendant.");
     Assert(first.ParentId is null, "A rejected cyclic move must not mutate the parent id.");
+    TodoPlanner.SetCompleted(child, true, DateTimeOffset.Now);
+    TodoPlanner.SetCompleted(second, true, DateTimeOffset.Now);
+    var completedParents = TodoPlanner.CompleteEligibleAncestors(items, child, DateTimeOffset.Now, _ => true);
+    Assert(completedParents.Contains(first), "Deleted incomplete children must not block parent completion.");
+    return Task.CompletedTask;
+}
+static Task TestItemLifecycle()
+{
+    var now = new DateTimeOffset(2026, 8, 21, 10, 0, 0, TimeSpan.FromHours(8));
+    var group = new TodoGroup { Name = "测试" };
+    var note = NewNote(now.AddMinutes(-1), ReminderState.Scheduled);
+    var parent = new TodoItem { GroupId = group.Id, Title = "父任务", IsCompleted = true, CompletedAt = now.AddHours(-1), ReminderAt = now.AddMinutes(-2) };
+    var child = new TodoItem { GroupId = group.Id, ParentId = parent.Id, Title = "子任务", IsCompleted = true, CompletedAt = now.AddHours(-1) };
+    var snapshot = new NoteSnapshot { Notes = [note], TodoGroups = [group], TodoItems = [parent, child] };
+
+    ItemLifecycle.MoveToTrash(note, now);
+    var deletedIds = ItemLifecycle.MoveTodoTreeToTrash(snapshot.TodoItems, parent, now);
+    Assert(note.DeletedAt == now && deletedIds.SetEquals([parent.Id, child.Id]), "Deleting should soft-delete a note and its entire todo subtree.");
+    Assert(ReminderPlanner.GetDue(snapshot.Notes, now).Count == 0 && TodoPlanner.GetDue(snapshot.TodoItems, now).Count == 0,
+        "Deleted objects must never trigger reminders.");
+
+    ItemLifecycle.Restore(note);
+    Assert(note.DeletedAt is null && note.IsHidden && note.ReminderState == ReminderState.Scheduled,
+        "Restoring a note should keep it hidden and re-arm its reminder.");
+    var restored = ItemLifecycle.RestoreTodoTree(snapshot, parent);
+    Assert(restored.Count == 2 && restored.All(item => item.DeletedAt is null),
+        "Restoring a todo should restore its subtree.");
+
+    var copies = ItemLifecycle.DuplicateTodoTree(snapshot.TodoItems, parent);
+    Assert(copies.Count == 2 && copies.All(item => !item.IsCompleted && item.CompletedAt is null && item.DeletedAt is null),
+        "Duplicated todo trees should preserve hierarchy while resetting completion and deletion state.");
+    Assert(copies.Select(item => item.Id).Intersect([parent.Id, child.Id]).Count() == 0,
+        "Duplicated todos must receive new ids.");
+    Assert(copies.Single(item => item.ParentId is null).Title.EndsWith("副本", StringComparison.Ordinal),
+        "The duplicate root should be identifiable and remain a root.");
+    Assert(parent.IsCompleted && child.IsCompleted, "Duplicating must not mutate the source todo tree.");
+
+    var missingGroupId = Guid.NewGuid();
+    var orphanedDeletedTodo = new TodoItem { GroupId = missingGroupId, Title = "分组已删除", DeletedAt = now };
+    var reloaded = new NoteSnapshot { TodoItems = [orphanedDeletedTodo] };
+    reloaded.Normalize();
+    Assert(reloaded.TodoItems.Contains(orphanedDeletedTodo), "Deleted todos must survive reload after their group is removed.");
+    ItemLifecycle.RestoreTodoTree(reloaded, orphanedDeletedTodo);
+    Assert(orphanedDeletedTodo.DeletedAt is null &&
+           reloaded.TodoGroups.Single().Name == "已恢复待办" &&
+           orphanedDeletedTodo.GroupId == reloaded.TodoGroups.Single().Id,
+        "Restoring an orphaned deleted todo should create and use the recovered group.");
+
+    var expired = new NoteDocument { Title = "过期", DeletedAt = now.AddDays(-31) };
+    var retained = new NoteDocument { Title = "保留", DeletedAt = now.AddDays(-29) };
+    snapshot.Notes.Add(expired);
+    snapshot.Notes.Add(retained);
+    var purged = ItemLifecycle.PurgeExpired(snapshot, now, 30);
+    Assert(purged == 1 && !snapshot.Notes.Contains(expired) && snapshot.Notes.Contains(retained),
+        "Startup purge should remove only items older than the configured retention.");
+    return Task.CompletedTask;
+}
+
+static Task TestSnoozePlanner()
+{
+    var now = new DateTimeOffset(2026, 8, 21, 22, 15, 20, TimeSpan.FromHours(8));
+    Assert(SnoozePlanner.GetDue(SnoozePreset.FiveMinutes, now) == now.AddMinutes(5), "Five-minute snooze should be exact.");
+    Assert(SnoozePlanner.GetDue(SnoozePreset.ThirtyMinutes, now) == now.AddMinutes(30), "Thirty-minute snooze should be exact.");
+    Assert(SnoozePlanner.GetDue(SnoozePreset.OneHour, now) == now.AddHours(1), "One-hour snooze should be exact.");
+    var tomorrow = SnoozePlanner.GetDue(SnoozePreset.TomorrowMorning, now);
+    Assert(tomorrow.LocalDateTime.Date == now.LocalDateTime.Date.AddDays(1) &&
+           tomorrow.LocalDateTime.TimeOfDay == TimeSpan.FromHours(9),
+        "Tomorrow-morning snooze should target 09:00 local time.");
     return Task.CompletedTask;
 }
 static Task TestClone()
@@ -179,6 +251,8 @@ static Task TestClone()
     snapshot.Groups.Add(new NoteGroup { Name = "Work" });
     snapshot.Notes[0].GroupId = snapshot.Groups[0].Id;
     snapshot.Notes[0].IsHidden = true;
+    snapshot.Notes[0].DeletedAt = DateTimeOffset.Now.AddDays(-2);
+    snapshot.Settings.RecycleBinRetentionDays = 45;
     var clone = snapshot.Clone();
     clone.Notes[0].Title = "Changed";
     clone.Settings.EnableMaterial = false;
@@ -196,12 +270,15 @@ static Task TestClone()
     Assert(snapshot.Settings.FavoriteTextColors.Count == 0, "Cloned favorite colors must be independent.");
     clone.Groups[0].Name = "Changed group";
     Assert(snapshot.Groups[0].Name == "Work", "Cloned groups must be independent.");
-    Assert(clone.Notes[0].IsHidden && clone.Notes[0].GroupId == clone.Groups[0].Id, "Clone must preserve note management state.");
+    Assert(clone.Notes[0].IsHidden && clone.Notes[0].GroupId == clone.Groups[0].Id && clone.Notes[0].DeletedAt == snapshot.Notes[0].DeletedAt,
+        "Clone must preserve note management and deletion state.");
+    Assert(clone.Settings.RecycleBinRetentionDays == 45, "Clone must preserve recycle-bin retention.");
     return Task.CompletedTask;
 }
 
 static Task TestSchema()
 {
+    Assert(new AppSettings().RecycleBinRetentionDays == 30, "Recycle-bin retention should default to 30 days.");
     var known = new NoteGroup { Name = "  工作  " };
     var orphan = new NoteDocument
     {
@@ -220,7 +297,7 @@ static Task TestSchema()
     snapshot.Settings.NewNoteHotkeyEnabled = false;
     snapshot.Normalize();
 
-    Assert(snapshot.SchemaVersion == 4, "Old snapshots should normalize to the current schema.");
+    Assert(snapshot.SchemaVersion == 5, "Old snapshots should normalize to the current schema.");
     Assert(known.Name == "工作", "Group names should normalize.");
     Assert(orphan.GroupId is null, "Unknown group references should move to ungrouped.");
     Assert(orphan.IsHidden, "Hidden state must survive normalization.");
@@ -231,6 +308,12 @@ static Task TestSchema()
         "Missing shortcut values should normalize to defaults.");
     Assert(!snapshot.Settings.NewNoteHotkeyEnabled, "Shortcut enabled state should survive normalization.");
     Assert(snapshot.Settings.AutoUpdateEnabled, "Legacy settings should enable automatic update checks by default.");
+    snapshot.Settings.RecycleBinRetentionDays = 0;
+    snapshot.Settings.Normalize();
+    Assert(snapshot.Settings.RecycleBinRetentionDays == 1, "Recycle-bin retention should clamp to at least one day.");
+    snapshot.Settings.RecycleBinRetentionDays = int.MaxValue;
+    snapshot.Settings.Normalize();
+    Assert(snapshot.Settings.RecycleBinRetentionDays == 3650, "Recycle-bin retention should clamp to the supported maximum.");
     return Task.CompletedTask;
 }
 

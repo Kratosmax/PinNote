@@ -77,6 +77,7 @@
                 <RowDefinition Height="112" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <StackPanel Margin="18,14,12,8">
                 <TextBlock Text="PinNote" FontSize="20" FontWeight="SemiBold" />
@@ -108,7 +109,23 @@
                 <Button Style="{StaticResource QuietButtonStyle}" Content="网络" Click="SettingsNavNetwork_Click" />
                 <Button Style="{StaticResource QuietButtonStyle}" Content="更新" Click="SettingsNavUpdates_Click" />
             </StackPanel>
-            <Grid Grid.Row="2" Margin="10,8,10,14">
+            <StackPanel x:Name="OverviewNavPanel" Grid.Row="2" Margin="10,8,10,0">
+                <Button Style="{StaticResource QuietButtonStyle}" HorizontalContentAlignment="Left" Click="ReminderCenter_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Width="24" Text="&#xE7BA;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <TextBlock Text="提醒中心" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Margin="0,6,0,0" Style="{StaticResource QuietButtonStyle}" HorizontalContentAlignment="Left" Click="RecycleBin_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Width="24" Text="&#xE74D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <TextBlock Text="回收站" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <Grid Grid.Row="3" Margin="10,8,10,14">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
                 <Button x:Name="AddGroupButton" Grid.Column="0" Style="{StaticResource QuietButtonStyle}" Content="+ 新建分组" Click="AddGroup_Click" />
                 <Button Grid.Column="1" Margin="6,0,0,0" Style="{StaticResource QuietButtonStyle}" Padding="0" Content="&#xE70F;"
@@ -122,23 +139,26 @@
 
         <Grid Grid.Column="2" Margin="22,18,22,20">
             <Grid.RowDefinitions>
-                <RowDefinition Height="46" />
+                <RowDefinition Height="84" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="300" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="118" /></Grid.ColumnDefinitions>
-                <TextBlock x:Name="PageTitle" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" />
-                <Border Grid.Column="1" Height="34" Margin="0,0,10,0" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                <Grid.RowDefinitions><RowDefinition Height="38" /><RowDefinition Height="38" /></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="138" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="118" /></Grid.ColumnDefinitions>
+                <TextBlock x:Name="PageTitle" Grid.ColumnSpan="4" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" />
+                <Border Grid.Row="1" Grid.Column="0" Height="34" Margin="0,0,10,0" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
                     <Grid>
                         <TextBlock Margin="10,0,0,0" VerticalAlignment="Center" Foreground="#7C858A" Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" />
                         <TextBox x:Name="SearchBox" Margin="34,0,8,0" BorderThickness="0" Background="Transparent"
                                  VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged" ToolTip="搜索标题或正文" />
                     </Grid>
                 </Border>
-                <Button x:Name="TodoWindowButton" Grid.Column="2" Width="132" Margin="0,0,10,0"
+                <ComboBox x:Name="SearchFilterCombo" Grid.Row="1" Grid.Column="1" Height="34" Margin="0,0,10,0"
+                          VerticalContentAlignment="Center" SelectionChanged="SearchFilter_Changed" />
+                <Button x:Name="TodoWindowButton" Grid.Row="1" Grid.Column="2" Width="132" Margin="0,0,10,0"
                         Visibility="Collapsed" Style="{StaticResource QuietButtonStyle}"
                         Content="显示分组窗口" Click="ShowTodoWindow_Click" />
-                <Button x:Name="CreateItemButton" Grid.Column="3" Style="{StaticResource CommandButtonStyle}"
+                <Button x:Name="CreateItemButton" Grid.Row="1" Grid.Column="3" Style="{StaticResource CommandButtonStyle}"
                         Content="+ 新建便签" Click="CreateItem_Click" />
             </Grid>
 
@@ -168,7 +188,7 @@
                     <Button x:Name="NoteMultiSelectButton" Width="72" HorizontalAlignment="Right" Style="{StaticResource QuietButtonStyle}" Content="多选" Click="ToggleNoteMultiSelect_Click" />
                 </Grid>
                 <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="108" /></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="144" /></Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="2" Text="标题" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
                     <TextBlock Grid.Column="3" Text="分组" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
                     <TextBlock Grid.Column="4" Text="提醒" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
@@ -181,7 +201,7 @@
                         <DataTemplate>
                             <Border MinWidth="650" Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="0,8">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="108" /></Grid.ColumnDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="36" /><ColumnDefinition Width="*" /><ColumnDefinition Width="145" /><ColumnDefinition Width="170" /><ColumnDefinition Width="144" /></Grid.ColumnDefinitions>
                                     <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{Binding DataContext.NoteSelectionVisibility, RelativeSource={RelativeSource AncestorType=Window}}"
                                               IsChecked="{Binding IsSelected, Mode=TwoWay}" Click="NoteSelection_Click" />
@@ -199,7 +219,8 @@
                                     <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Button Style="{StaticResource IconButtonStyle}" Content="{Binding ToggleGlyph}" ToolTip="显示或隐藏" Click="ToggleVisibility_Click" />
                                         <Button Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" ToolTip="打开编辑" Click="OpenNote_Click" />
-                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="删除" Click="DeleteNote_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE8C8;" ToolTip="复制便签" Click="DuplicateNote_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="移入回收站" Click="DeleteNote_Click" />
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -230,7 +251,7 @@
                     <Button x:Name="TodoMultiSelectButton" Width="72" HorizontalAlignment="Right" Style="{StaticResource QuietButtonStyle}" Content="多选" Click="ToggleTodoMultiSelect_Click" />
                 </Grid>
                 <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="140" /></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="176" /></Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="1" Text="待办事项" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
                     <TextBlock Grid.Column="2" Text="提醒" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
                     <TextBlock Grid.Column="3" Text="操作" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
@@ -241,7 +262,7 @@
                         <DataTemplate>
                             <Border MinWidth="650" Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="0,9">
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="140" /></Grid.ColumnDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /><ColumnDefinition Width="170" /><ColumnDefinition Width="176" /></Grid.ColumnDefinitions>
                                     <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
                                               Visibility="{Binding DataContext.TodoSelectionVisibility, RelativeSource={RelativeSource AncestorType=Window}}"
                                               IsChecked="{Binding IsSelected, Mode=TwoWay}" Click="TodoSelection_Click" />
@@ -282,7 +303,8 @@
                                         <Button Style="{StaticResource IconButtonStyle}" Content="&#xE710;" ToolTip="新增子待办" Click="AddChildTodo_Click" />
                                         <Button Style="{StaticResource IconButtonStyle}" Content="&#xE70F;" ToolTip="重命名" Click="RenameTodo_Click" />
                                         <Button Style="{StaticResource IconButtonStyle}" Content="&#xE823;" ToolTip="设置或清除提醒" Click="SetTodoReminder_Click" />
-                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="删除及其子待办" Click="DeleteTodo_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE8C8;" ToolTip="复制待办及其子级" Click="DuplicateTodo_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="移入回收站" Click="DeleteTodo_Click" />
                                     </StackPanel>
                                 </Grid>
 
@@ -291,6 +313,35 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <TextBlock x:Name="TodoCountText" Grid.Row="3" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
+            </Grid>
+            <Grid x:Name="OverviewPanel" Grid.Row="1" Visibility="Collapsed">
+                <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="30" /></Grid.RowDefinitions>
+                <ListBox x:Name="OverviewList" BorderThickness="0" Background="Transparent"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ItemContainerStyle="{StaticResource ListItemStyle}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="White" BorderBrush="#D7DEE0" BorderThickness="1" CornerRadius="5" Padding="12,10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="90" /><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Kind}" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                                        <TextBlock Text="{Binding Subtitle}" Margin="0,3,12,0" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding Status}" VerticalAlignment="Center" Foreground="{Binding StatusBrush}" />
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE8A7;" ToolTip="打开" Visibility="{Binding OpenVisibility}" Click="OverviewOpen_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE8C8;" ToolTip="复制" Visibility="{Binding DuplicateVisibility}" Click="OverviewDuplicate_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Content="&#xE777;" ToolTip="恢复" Visibility="{Binding RestoreVisibility}" Click="OverviewRestore_Click" />
+                                        <Button Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" Content="&#xE74D;" ToolTip="永久删除" Visibility="{Binding PurgeVisibility}" Click="OverviewPurge_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock x:Name="OverviewCountText" Grid.Row="1" VerticalAlignment="Bottom" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" />
             </Grid>
             <ContentControl x:Name="SettingsPanelControl" Grid.Row="1" Visibility="Collapsed" />
         </Grid>

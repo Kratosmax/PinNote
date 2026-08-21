@@ -27,8 +27,31 @@
             <TextBlock x:Name="PreviewText" Grid.Row="2" Foreground="{StaticResource TextSecondaryBrush}" FontSize="16"
                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="100" />
             <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
-                <Button MinWidth="90" Height="36" Margin="0,0,8,0" Background="Transparent" BorderBrush="{StaticResource BorderBrush}"
-                        Content="5 分钟后" Click="Snooze_Click" />
+                <Button x:Name="SnoozeButton" MinWidth="104" Height="36" Margin="0,0,8,0"
+                        Style="{StaticResource SecondaryButtonStyle}" Content="稍后提醒"
+                        Click="SnoozeMenu_Click">
+                    <Button.ContextMenu>
+                                                <ContextMenu Placement="Top" Padding="4"
+                                     Background="{StaticResource SurfaceRaisedBrush}"
+                                     BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                            <ContextMenu.Resources>
+                                <Style TargetType="MenuItem">
+                                    <Setter Property="Padding" Value="12,7" />
+                                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="#14147D76" /></Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ContextMenu.Resources>
+                            <MenuItem Header="5 分钟后" Tag="FiveMinutes" Click="SnoozePreset_Click" />
+                            <MenuItem Header="30 分钟后" Tag="ThirtyMinutes" Click="SnoozePreset_Click" />
+                            <MenuItem Header="1 小时后" Tag="OneHour" Click="SnoozePreset_Click" />
+                            <Separator />
+                            <MenuItem Header="明天早上 09:00" Tag="TomorrowMorning" Click="SnoozePreset_Click" />
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
                 <Button MinWidth="82" Height="36" Margin="0,0,8,0" Background="Transparent" BorderBrush="{StaticResource BorderBrush}"
                         Content="忽略" Click="Dismiss_Click" />
                 <Button MinWidth="92" Height="36" Style="{StaticResource CommandButtonStyle}" Content="完成" Click="Complete_Click" />

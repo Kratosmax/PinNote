@@ -2,16 +2,18 @@
 
 PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。它使用 WPF 和 .NET 8 构建，支持桌面便签、全局置顶、分级提醒、统一管理和全局快捷键，数据默认只保存在本机。
 
-当前版本：`0.8.0`
+当前版本：`0.9.0`
 
-> **0.6.0 升级提示：** `0.6.0` 的自动更新会在启动新版更新器之前被临时 ZIP 文件锁阻断，因此无法自动安装 `0.6.1`。请从 [最新 Release](https://github.com/Kratosmax/PinNote/releases/latest) 手动下载并安装一次 `0.8.0`；便签和设置保存在 `%LOCALAPPDATA%\PinNote`，不会因覆盖安装或替换便携包而删除。升级后，后续自动更新恢复正常。
+> **0.6.0 升级提示：** `0.6.0` 的自动更新会在启动新版更新器之前被临时 ZIP 文件锁阻断，因此无法自动安装 `0.6.1`。请从 [最新 Release](https://github.com/Kratosmax/PinNote/releases/latest) 手动下载并安装一次 `0.9.0`；便签和设置保存在 `%LOCALAPPDATA%\PinNote`，不会因覆盖安装或替换便携包而删除。升级后，后续自动更新恢复正常。
 
-## 0.8.0 本轮更新
+## 0.9.0 本轮更新
 
-- 设置入口并入管理页，与便签、待办成为同级模式，不再打开独立设置窗口。
-- 常规、快捷键、网络、更新整合为一个可滚动长页面，并支持左侧分类一键定位。
-- 托盘右键“设置”直接打开管理页设置模式，移除重复的右上角设置入口。
-- 取消设置会放弃当前页面编辑并返回便签管理页。
+- 新增回收站：便签和待办删除后可恢复，默认保留 30 天，并可在设置中自定义保留期限。
+- 新增统一搜索与筛选，可跨便签和待办查找，并按提醒、逾期和完成状态筛选。
+- 新增提醒中心，集中查看便签和待办的提醒时间与逾期状态。
+- 稍后提醒新增 5 分钟、30 分钟、1 小时和明天 09:00 四种预设。
+- 支持复制便签和整棵待办；复制的待办会保留层级与提醒，并重置为未完成。
+- 托盘中的便签与待办菜单改为对等结构，补齐待办入口，并修复管理页图标和待办文字垂直对齐。
 
 ## 下载选择
 
@@ -26,14 +28,16 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 
 ## 功能概览
 
-- 多便签与基础富文本：粗体、斜体、下划线、项目符号、固定文字色和 3 个自定义常用色。
+- 多便签与基础富文本：粗体、斜体、下划线、Markdown 编辑/渲染、固定文字色和 3 个自定义常用色。
 - 两种固定方式：桌面模式与始终置顶。
 - 四级提醒：弱提醒、普通提醒、强提醒、超强提醒。
 - 提醒时间可精确到秒，悬浮在提醒强度上可查看实际提醒动作。
-- 逾期状态、稍后提醒、忽略和完成。
-- 统一管理页面：便签、待办、设置同级切换；支持新建、搜索、分组、批量管理和设置分类定位。
+- 逾期状态、提醒中心，以及 5 分钟、30 分钟、1 小时、明天 09:00 的稍后提醒预设。
+- 统一管理页面：便签、待办、设置同级切换；支持跨类型搜索、状态筛选、分组、批量管理、提醒中心和设置分类定位。
 - 单实例运行：重复启动时激活已有管理页面，不创建重复进程。
 - 自动保存便签内容、窗口位置、尺寸、分组和显示状态。
+- 回收站默认保留 30 天，可恢复或永久删除便签和待办，并可在设置中调整期限。
+- 支持复制便签和整棵待办；待办副本保留层级与提醒，但重置完成状态。
 - 可自定义全局快捷键，也可以分别关闭。
 - Windows 11 22621+ 系统背景材质；Windows 10、较早系统或 DWM 调用失败时使用清晰的不透明回退。
 - 空闲时没有键盘轮询；全局快捷键使用系统 `RegisterHotKey`。
@@ -44,7 +48,7 @@ PinNote 是一款面向 Windows 10 / Windows 11 的轻量桌面便签工具。�
 
 ### 第一次启动
 
-运行 `PinNote.exe` 后会创建一张新便签。程序关闭便签窗口后仍驻留在系统托盘；需要彻底退出时，右键托盘图标并选择“退出”。
+运行 `PinNote.exe` 后会创建一张新便签。程序关闭便签窗口后仍驻留在系统托盘；托盘右键菜单提供对等的“便签”和“待办”子菜单，可分别新建、打开管理页，以及显示或隐藏全部对应窗口。需要彻底退出时选择“退出”。
 
 用户数据默认保存在：
 
@@ -111,17 +115,17 @@ GitHub URL 前缀服务会看到完整 GitHub 下载 URL。建议优先使用可
 
 已超过提醒时间的便签会保留柔和的警告色边框。
 
-### 管理全部便签
+### 统一管理与回收站
 
 双击托盘图标，或使用管理页面快捷键，可以打开统一管理页面。在这里可以：
 
-- 搜索标题和正文。
-- 新建、打开或删除便签。
-- 创建、重命名和删除分组。
-- 修改便签所属分组。
-- 隐藏或重新显示便签。
+- 跨便签和待办搜索标题与正文，并按提醒、逾期和完成状态筛选。
+- 新建、打开、复制或删除便签与待办。
+- 创建、重命名和删除分组，修改项目所属分组。
+- 隐藏或重新显示便签，在提醒中心集中查看提醒与逾期状态。
+- 从回收站恢复项目，或永久删除不再需要的数据。
 
-删除操作不可恢复，程序会在执行前请求确认。
+普通删除会移入回收站。程序启动时会清理超过保留期限的项目；默认保留 30 天，可在“设置 → 常规”中修改。
 
 ### 全局快捷键
 
@@ -193,7 +197,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 产物目录：
 
 ```text
-temp/release/v0.6.1/
+temp/release/v0.9.0/
 ```
 
 独立复核真实 ZIP 和签名清单：
@@ -202,21 +206,21 @@ temp/release/v0.6.1/
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-framework-dependent `
-  --manifest temp/release/v0.6.1/update.json `
-  --package temp/release/v0.6.1/PinNote-0.6.1-Lite-Portable.zip
+  --manifest temp/release/v0.9.0/update.json `
+  --package temp/release/v0.9.0/PinNote-0.9.0-Lite-Portable.zip
 
 dotnet run --project tools/PinNote.ReleaseTool/PinNote.ReleaseTool.csproj `
   --configuration Release --no-build -- verify `
   --channel portable-self-contained `
-  --manifest temp/release/v0.6.1/update-full.json `
-  --package temp/release/v0.6.1/PinNote-0.6.1-Full-Portable.zip
+  --manifest temp/release/v0.9.0/update-full.json `
+  --package temp/release/v0.9.0/PinNote-0.9.0-Full-Portable.zip
 ```
 
 ### GitHub 发布流程
 
 `.github/workflows/release.yml` 在推送 `v*.*.*` 标签时运行，并强制标签与 `Directory.Build.props` 的版本一致。仓库必须预先配置 Actions Secret `PINNOTE_UPDATE_SIGNING_KEY`，内容为与源码公钥匹配的 PEM 私钥。工作流只授予 `contents: write`，使用临时文件完成签名并在 `finally` 删除私钥。
 
-发布属于独立授权动作。确认候选包、版本和发布说明后，再创建并推送标签；不要覆盖已公开的同版本资产。
+发布属于独立授权动作。确认候选包、版本和发布说明后，再创建并推送标签；不要覆盖已公开的同版本资产。GitHub Release 正文必须使用只含当前版本变更的 `RELEASE_NOTES_CURRENT.md`；历史 `RELEASE_NOTES.md` 只用于仓库内查阅，不得直接作为 Release 正文。
 
 ## 项目结构
 

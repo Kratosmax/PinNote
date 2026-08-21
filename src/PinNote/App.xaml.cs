@@ -82,8 +82,11 @@ public sealed partial class App : System.Windows.Application
             _snapshot = new NoteSnapshot();
         }
 
+        var purgedItems = ItemLifecycle.PurgeExpired(
+            _snapshot, DateTimeOffset.Now, _snapshot.Settings.RecycleBinRetentionDays);
         _saveCoordinator = new SaveCoordinator(store, () => _snapshot.Clone());
         _saveCoordinator.SaveFailed += OnSaveFailed;
+        if (purgedItems > 0) _saveCoordinator.MarkDirty();
         _reminderScheduler = new ReminderScheduler(() => Dispatcher.BeginInvoke(ProcessDueReminders));
         _updateClient = new UpdateClient();
 
@@ -96,14 +99,14 @@ public sealed partial class App : System.Windows.Application
             _trayIcon?.ShowBalloonTip(5000, "PinNote 快捷键未启用", hotkeyError, Forms.ToolTipIcon.Warning);
         }
 
-        if (_snapshot.Notes.Count == 0)
+        if (_snapshot.Notes.All(note => note.DeletedAt is not null))
         {
             _snapshot.Notes.Add(CreateDefaultNote());
             _saveCoordinator.MarkDirty();
         }
 
         var startInBackground = e.Args.Any(argument => argument.Equals("--background", StringComparison.OrdinalIgnoreCase));
-        foreach (var note in _snapshot.Notes.ToArray())
+        foreach (var note in _snapshot.Notes.Where(note => note.DeletedAt is null).ToArray())
         {
             var window = CreateNoteWindow(note);
             if (!startInBackground && !note.IsHidden)
@@ -160,9 +163,20 @@ public sealed partial class App : System.Windows.Application
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add("管理便签与待办", null, (_, _) => Dispatcher.Invoke(ShowManager));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
-        _trayMenu.Items.Add("新建便签", null, (_, _) => Dispatcher.Invoke(CreateNewNote));
-        _trayMenu.Items.Add("显示全部", null, (_, _) => Dispatcher.Invoke(ShowAllNotes));
-        _trayMenu.Items.Add("隐藏全部", null, (_, _) => Dispatcher.Invoke(HideAllNotes));
+        var noteMenu = new Forms.ToolStripMenuItem("便签");
+        noteMenu.DropDownItems.Add("新建便签", null, (_, _) => Dispatcher.Invoke(CreateNewNote));
+        noteMenu.DropDownItems.Add("打开便签管理", null, (_, _) => Dispatcher.Invoke(() => { ShowManager(); _managerWindow?.ShowNoteMode(); }));
+        noteMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
+        noteMenu.DropDownItems.Add("显示全部便签窗口", null, (_, _) => Dispatcher.Invoke(ShowAllNoteWindows));
+        noteMenu.DropDownItems.Add("隐藏全部便签窗口", null, (_, _) => Dispatcher.Invoke(HideAllNoteWindows));
+        _trayMenu.Items.Add(noteMenu);
+        var todoMenu = new Forms.ToolStripMenuItem("待办");
+        todoMenu.DropDownItems.Add("新建待办分组", null, (_, _) => Dispatcher.Invoke(CreateNewTodoGroupFromTray));
+        todoMenu.DropDownItems.Add("打开待办管理", null, (_, _) => Dispatcher.Invoke(() => { ShowManager(); _managerWindow?.ShowTodoMode(); }));
+        todoMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
+        todoMenu.DropDownItems.Add("显示全部待办窗口", null, (_, _) => Dispatcher.Invoke(ShowAllTodoGroups));
+        todoMenu.DropDownItems.Add("隐藏全部待办窗口", null, (_, _) => Dispatcher.Invoke(HideAllTodoGroups));
+        _trayMenu.Items.Add(todoMenu);
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
         _trayMenu.Items.Add("设置", null, (_, _) => Dispatcher.Invoke(() => { ShowManager(); _managerWindow?.ShowSettingsMode(); }));
         _trayMenu.Items.Add(new Forms.ToolStripSeparator());
@@ -213,6 +227,7 @@ public sealed partial class App : System.Windows.Application
         };
         window.NewRequested += _ => CreateNewNote();
         window.DeleteRequested += DeleteNote;
+        window.DuplicateRequested += changedWindow => DuplicateNote(changedWindow.Note);
         window.HideRequested += changedWindow => SetNoteVisibility(changedWindow.Note, visible: false);
         window.FavoriteTextColorAdded += RememberFavoriteTextColor;
         _noteWindows[note.Id] = window;
@@ -231,6 +246,28 @@ public sealed partial class App : System.Windows.Application
         _todoGroupWindows[group.Id] = window;
         _ = new WindowInteropHelper(window).EnsureHandle();
         return window;
+    }
+
+    private void CreateNewTodoGroupFromTray()
+    {
+        const string baseName = "新待办分组";
+        var usedNames = _snapshot.TodoGroups.Select(group => group.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var name = baseName;
+        for (var suffix = 2; usedNames.Contains(name); suffix++) name = $"{baseName} {suffix}";
+        var area = SystemParameters.WorkArea;
+        var offset = _snapshot.TodoGroups.Count * 24;
+        var group = new TodoGroup
+        {
+            Name = name,
+            SortOrder = _snapshot.TodoGroups.Count,
+            Left = Math.Min(area.Right - 430, area.Left + 120 + offset),
+            Top = Math.Min(area.Bottom - 500, area.Top + 100 + offset)
+        };
+        _snapshot.TodoGroups.Add(group);
+        var window = CreateTodoGroupWindow(group);
+        window.ShowFromTray(activate: true);
+        MarkDirty();
+        RefreshManagerIfVisible();
     }
 
     private void CreateNewTodoGroup(TodoGroupWindow sourceWindow)
@@ -280,7 +317,7 @@ public sealed partial class App : System.Windows.Application
         }
 
         foreach (var todoId in _todoReminderWindows.Keys.Where(todoId =>
-                     _snapshot.TodoItems.All(todo => todo.Id != todoId)).ToArray())
+                     _snapshot.TodoItems.All(todo => todo.Id != todoId || todo.DeletedAt is not null)).ToArray())
         {
             _todoReminderWindows[todoId].CloseWithoutAction();
             _todoReminderWindows.Remove(todoId);
@@ -374,18 +411,39 @@ public sealed partial class App : System.Windows.Application
 
     private void DeleteNote(NoteDocument note)
     {
-        _snapshot.Notes.Remove(note);
-        if (!_noteWindows.Remove(note.Id, out var window))
-        {
-            return;
-        }
-        if (_reminderWindows.Remove(note.Id, out var reminderWindow))
-        {
-            reminderWindow.Close();
-        }
-        window.AllowCloseAndClose();
+        ItemLifecycle.MoveToTrash(note, DateTimeOffset.Now);
+        if (_noteWindows.Remove(note.Id, out var window)) window.AllowCloseAndClose();
+        if (_reminderWindows.Remove(note.Id, out var reminderWindow)) reminderWindow.CloseWithoutAction();
         MarkDirty();
         _reminderScheduler?.Refresh(_snapshot.Notes, _snapshot.TodoItems);
+        RefreshManagerIfVisible();
+    }
+
+    private NoteDocument DuplicateNote(NoteDocument source)
+    {
+        var copy = ItemLifecycle.Duplicate(source, DateTimeOffset.Now);
+        _snapshot.Notes.Add(copy);
+        var window = CreateNoteWindow(copy);
+        window.ShowFromTray(activate: true);
+        MarkDirty();
+        RefreshManagerIfVisible();
+        return copy;
+    }
+
+    private void RestoreNote(NoteDocument note)
+    {
+        ItemLifecycle.Restore(note);
+        if (!_noteWindows.ContainsKey(note.Id)) CreateNoteWindow(note);
+        MarkDirty();
+        _reminderScheduler?.Refresh(_snapshot.Notes, _snapshot.TodoItems);
+        RefreshManagerIfVisible();
+    }
+
+    private void PurgeNote(NoteDocument note)
+    {
+        if (_noteWindows.Remove(note.Id, out var window)) window.AllowCloseAndClose();
+        _snapshot.Notes.Remove(note);
+        MarkDirty();
         RefreshManagerIfVisible();
     }
 
@@ -406,6 +464,54 @@ public sealed partial class App : System.Windows.Application
         }
 
         (_todoGroupWindows.Values.LastOrDefault() as Window ?? _noteWindows.Values.LastOrDefault())?.Activate();
+        MarkDirty();
+        RefreshManagerIfVisible();
+    }
+
+    private void ShowAllNoteWindows()
+    {
+        foreach (var (id, window) in _noteWindows)
+        {
+            var note = _snapshot.Notes.First(item => item.Id == id);
+            note.IsHidden = false;
+            window.ShowFromTray(activate: false);
+        }
+        _noteWindows.Values.LastOrDefault()?.Activate();
+        MarkDirty();
+        RefreshManagerIfVisible();
+    }
+
+    private void HideAllNoteWindows()
+    {
+        foreach (var (id, window) in _noteWindows)
+        {
+            _snapshot.Notes.First(item => item.Id == id).IsHidden = true;
+            window.Hide();
+        }
+        MarkDirty();
+        RefreshManagerIfVisible();
+    }
+
+    private void ShowAllTodoGroups()
+    {
+        foreach (var (id, window) in _todoGroupWindows)
+        {
+            var group = _snapshot.TodoGroups.First(item => item.Id == id);
+            group.IsHidden = false;
+            window.ShowFromTray(activate: false);
+        }
+        _todoGroupWindows.Values.LastOrDefault()?.Activate();
+        MarkDirty();
+        RefreshManagerIfVisible();
+    }
+
+    private void HideAllTodoGroups()
+    {
+        foreach (var (id, window) in _todoGroupWindows)
+        {
+            _snapshot.TodoGroups.First(item => item.Id == id).IsHidden = true;
+            window.Hide();
+        }
         MarkDirty();
         RefreshManagerIfVisible();
     }
@@ -447,6 +553,9 @@ public sealed partial class App : System.Windows.Application
             note => SetNoteVisibility(note, visible: true, activate: true),
             (note, visible) => SetNoteVisibility(note, visible),
             DeleteNote,
+            DuplicateNote,
+            RestoreNote,
+            PurgeNote,
             (group, visible) => SetTodoGroupVisibility(group, visible, activate: true),
             OnManagerDataChanged,
             () => new SettingsPanel(_snapshot.Settings, TryApplySettings, network => CheckForUpdatesAsync(manual: true, network), UpdateClient.CurrentVersion));
@@ -676,11 +785,11 @@ public sealed partial class App : System.Windows.Application
 
     private void ResumeTriggeredReminders()
     {
-        foreach (var note in _snapshot.Notes.Where(note => note.ReminderState == ReminderState.Triggered))
+        foreach (var note in _snapshot.Notes.Where(note => note.DeletedAt is null && note.ReminderState == ReminderState.Triggered))
         {
             PresentReminder(note);
         }
-        foreach (var todo in _snapshot.TodoItems.Where(todo => todo.ReminderState == ReminderState.Triggered))
+        foreach (var todo in _snapshot.TodoItems.Where(todo => todo.DeletedAt is null && todo.ReminderState == ReminderState.Triggered))
         {
             PresentTodoReminder(todo);
         }
@@ -724,9 +833,9 @@ public sealed partial class App : System.Windows.Application
 
         var reminder = new ReminderWindow(note, noteWindow.GetPlainText(), _snapshot.Settings.EnableMaterial);
         PlaceReminderWindow(reminder);
-        reminder.SnoozeRequested += _ =>
+        reminder.SnoozeRequested += (_, due) =>
         {
-            ReminderStateMachine.Snooze(note, DateTimeOffset.Now.AddMinutes(5));
+            ReminderStateMachine.Snooze(note, due);
             noteWindow.StopReminderSignal();
             noteWindow.RefreshReminderStatus();
             MarkDirty();
@@ -807,9 +916,9 @@ public sealed partial class App : System.Windows.Application
         var reminder = new ReminderWindow(todo.Title, $"分组：{groupName}", todo.ReminderLevel,
             _snapshot.Settings.EnableMaterial, "待办");
         PlaceReminderWindow(reminder);
-        reminder.SnoozeRequested += _ =>
+        reminder.SnoozeRequested += (_, due) =>
         {
-            TodoPlanner.Snooze(todo, DateTimeOffset.Now.AddMinutes(5));
+            TodoPlanner.Snooze(todo, due);
             groupWindow.StopReminderSignal();
             groupWindow.RefreshData();;
             MarkDirty();
@@ -984,6 +1093,16 @@ public sealed partial class App : System.Windows.Application
         reminder.Show();
         await Task.Delay(220);
         VisualCaptureService.Capture(reminder, Path.Combine(directory, "strong-reminder.png"));
+        var snoozeMenu = reminder.OpenSnoozeMenuForVisualQa();
+        try
+        {
+            await Task.Delay(120);
+            VisualCaptureService.Capture(snoozeMenu, Path.Combine(directory, "reminder-snooze-menu.png"));
+        }
+        finally
+        {
+            snoozeMenu.IsOpen = false;
+        }
         reminder.CloseWithoutAction();
 
         var visualUpdate = new UpdateInfo(
@@ -1043,6 +1162,18 @@ public sealed partial class App : System.Windows.Application
         };
         _snapshot.TodoGroups.Add(todoGroup);
         _snapshot.TodoItems.AddRange([parentTodo, childTodo, grandchildTodo]);
+        _snapshot.Notes.Add(new NoteDocument
+        {
+            Title = "已删除的会议记录",
+            DeletedAt = DateTimeOffset.Now.AddDays(-2),
+            IsHidden = true
+        });
+        _snapshot.TodoItems.Add(new TodoItem
+        {
+            GroupId = todoGroup.Id,
+            Title = "已删除的测试任务",
+            DeletedAt = DateTimeOffset.Now.AddDays(-1)
+        });
 
         SyncTodoGroupWindows();
         var manager = EnsureManagerWindow();
@@ -1062,6 +1193,24 @@ public sealed partial class App : System.Windows.Application
         manager.SelectTodosForVisualQa();
         await Task.Delay(320);
         VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-todos-multiselect.png"));
+
+        manager.ShowUnifiedSearchForVisualQa();
+        await Task.Delay(180);
+        VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-unified-search.png"));
+        manager.Width = manager.MinWidth;
+        manager.Height = manager.MinHeight;
+        await Task.Delay(180);
+        VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-unified-search-minimum.png"));
+        manager.Width = 1040;
+        manager.Height = 680;
+
+        manager.ShowReminderCenterForVisualQa();
+        await Task.Delay(180);
+        VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-reminder-center.png"));
+
+        manager.ShowRecycleBinForVisualQa();
+        await Task.Delay(180);
+        VisualCaptureService.Capture(manager, Path.Combine(directory, "manager-recycle-bin.png"));
 
         manager.ShowSettingsMode();
         await Task.Delay(180);
@@ -1132,6 +1281,31 @@ public sealed partial class App : System.Windows.Application
         reminderDialog.Close();
         todoWindow.Hide();
         manager.Hide();
+
+        await CaptureTraySubmenuForVisualQa("便签", Path.Combine(directory, "tray-note-menu.png"));
+        await CaptureTraySubmenuForVisualQa("待办", Path.Combine(directory, "tray-todo-menu.png"));
+    }
+
+    private async Task CaptureTraySubmenuForVisualQa(string submenuText, string path)
+    {
+        if (_trayMenu is null) throw new InvalidOperationException("视觉测试未创建托盘菜单。");
+        var location = new System.Drawing.Point(
+            (int)SystemParameters.WorkArea.Left + 48,
+            (int)SystemParameters.WorkArea.Top + 48);
+        _trayMenu.Show(location);
+        var submenu = _trayMenu.Items.OfType<Forms.ToolStripMenuItem>()
+            .Single(item => item.Text == submenuText);
+        submenu.ShowDropDown();
+        await Task.Delay(160);
+        var bounds = System.Drawing.Rectangle.Union(_trayMenu.Bounds, submenu.DropDown.Bounds);
+        using var bitmap = new System.Drawing.Bitmap(bounds.Width, bounds.Height);
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(bounds.Location, System.Drawing.Point.Empty, bounds.Size);
+        }
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+        _trayMenu.Close();
+        await Task.Delay(60);
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject

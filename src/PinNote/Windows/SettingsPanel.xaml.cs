@@ -29,6 +29,7 @@ public sealed partial class SettingsPanel : UserControl
         StartWithWindowsBox.IsChecked = settings.StartWithWindows;
         MaterialBox.IsChecked = settings.EnableMaterial;
         AutoCompleteParentTodoBox.IsChecked = settings.AutoCompleteParentTodo;
+        RecycleBinDaysBox.Text = settings.RecycleBinRetentionDays.ToString();
         AutoUpdateBox.IsChecked = settings.AutoUpdateEnabled;
         CurrentVersionText.Text = $"当前版本 {currentVersion.ToString(3)}";
         NewNoteHotkeyEnabledBox.IsChecked = settings.NewNoteHotkeyEnabled;
@@ -131,6 +132,12 @@ public sealed partial class SettingsPanel : UserControl
         candidate.StartWithWindows = StartWithWindowsBox.IsChecked == true;
         candidate.EnableMaterial = MaterialBox.IsChecked == true;
         candidate.AutoCompleteParentTodo = AutoCompleteParentTodoBox.IsChecked == true;
+        if (!int.TryParse(RecycleBinDaysBox.Text.Trim(), out var retentionDays) || retentionDays is < 1 or > 3650)
+        {
+            ErrorText.Text = "回收站保留天数必须是 1 到 3650 之间的整数。";
+            return;
+        }
+        candidate.RecycleBinRetentionDays = retentionDays;
         candidate.AutoUpdateEnabled = AutoUpdateBox.IsChecked == true;
         candidate.NewNoteHotkeyEnabled = NewNoteHotkeyEnabledBox.IsChecked == true;
         candidate.NewNoteHotkey = NewNoteHotkeyBox.Text;

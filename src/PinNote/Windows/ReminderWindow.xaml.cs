@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using PinNote.Core.Models;
+using PinNote.Core.Reminders;
 using PinNote.Infrastructure;
 
 namespace PinNote.Windows;
@@ -33,7 +34,7 @@ public sealed partial class ReminderWindow : Window
         Tag = materialEnabled;
     }
 
-    public event Action<ReminderWindow>? SnoozeRequested;
+    public event Action<ReminderWindow, DateTimeOffset>? SnoozeRequested;
 
     public event Action<ReminderWindow>? DismissRequested;
 
@@ -43,6 +44,14 @@ public sealed partial class ReminderWindow : Window
     {
         _handled = true;
         Close();
+    }
+
+    internal ContextMenu OpenSnoozeMenuForVisualQa()
+    {
+        var menu = SnoozeButton.ContextMenu ?? throw new InvalidOperationException("视觉测试未找到稍后提醒菜单。");
+        menu.PlacementTarget = SnoozeButton;
+        menu.IsOpen = true;
+        return menu;
     }
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
@@ -82,10 +91,23 @@ public sealed partial class ReminderWindow : Window
         });
     }
 
-    private void Snooze_Click(object sender, RoutedEventArgs e)
+    private void SnoozeMenu_Click(object sender, RoutedEventArgs e)
     {
+        if (SnoozeButton.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = SnoozeButton;
+        menu.IsOpen = true;
+    }
+
+    private void SnoozePreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string value } ||
+            !Enum.TryParse<SnoozePreset>(value, out var preset))
+        {
+            return;
+        }
+
         _handled = true;
-        SnoozeRequested?.Invoke(this);
+        SnoozeRequested?.Invoke(this, SnoozePlanner.GetDue(preset, DateTimeOffset.Now));
         Close();
     }
 

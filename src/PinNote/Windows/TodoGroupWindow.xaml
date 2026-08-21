@@ -62,6 +62,7 @@
                             <MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="编辑" Click="ContextEdit_Click"/>
                             <MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="增加" Click="ContextAdd_Click"/>
                             <MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="设置提醒时间" Click="ContextReminder_Click"/>
+                            <MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="复制" Click="ContextDuplicate_Click"/>
                             <MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="删除" Foreground="{StaticResource DangerBrush}" Click="ContextDelete_Click"/>
                             <Separator/><MenuItem Style="{StaticResource TodoMenuItemStyle}" Header="多选" Click="ContextMultiSelect_Click"/>
                         </ContextMenu></Border.ContextMenu>
@@ -69,7 +70,7 @@
                             <CheckBox Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding SelectionVisibility}" IsChecked="{Binding IsSelected, Mode=OneWay}" Click="Selection_Click" ToolTip="选择"/>
                             <Button Grid.Column="1" Width="22" Height="28" Style="{StaticResource IconButtonStyle}" Content="{Binding ExpandGlyph}" Visibility="{Binding ExpandVisibility}" ToolTip="折叠或展开子级" Click="ToggleExpanded_Click"/>
                             <CheckBox Grid.Column="2" Style="{StaticResource TodoCheckStyle}" VerticalAlignment="Center" IsChecked="{Binding IsCompleted, Mode=OneWay}" Click="Complete_Click" ToolTip="标记完成"/>
-                            <Grid Grid.Column="3" Margin="2,5,4,5"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid Grid.Column="3" Margin="2,5,4,5" VerticalAlignment="Center"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Grid><TextBlock Text="{Binding Title}" Foreground="{Binding Foreground}" VerticalAlignment="Center" TextWrapping="Wrap" ToolTip="{Binding Title}" MouseLeftButtonDown="TodoTitle_MouseLeftButtonDown"/>
                                     <Border Height="1.5" Background="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" RenderTransformOrigin="0,0.5" Visibility="{Binding StrikeVisibility}">
                                         <Border.RenderTransform><ScaleTransform ScaleX="1"/></Border.RenderTransform>
@@ -81,7 +82,7 @@
                                             </Storyboard></BeginStoryboard></DataTrigger.EnterActions></DataTrigger>
                                         </Style.Triggers></Style></Border.Style>
                                     </Border>
-                                </Grid><TextBlock Grid.Row="1" Text="{Binding ReminderText}" Foreground="{Binding ReminderBrush}" Margin="0,2,0,0" FontSize="11"/>
+                                </Grid><TextBlock Grid.Row="1" Text="{Binding ReminderText}" Foreground="{Binding ReminderBrush}" Visibility="{Binding ReminderVisibility}" Margin="0,2,0,0" FontSize="11"/>
                             </Grid>
                             <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Width="28" Height="28" Style="{StaticResource IconButtonStyle}" Content="&#xE710;" ToolTip="增加子级" Click="AddChild_Click"/>
